@@ -1,3 +1,5 @@
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+
 class AuthService {
 	constructor() {
 		this.accessToken = null; // Store in memory only
@@ -72,7 +74,7 @@ class AuthService {
 		try {
 			console.log('[AUTH] Refreshing access token...');
 			
-			const response = await fetch('/api/auth/refresh', {
+			const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
 				method: 'POST',
 				credentials: 'include', // Include httpOnly cookies
 				headers: {
@@ -120,7 +122,7 @@ class AuthService {
 		try {
 			console.log('[AUTH] Attempting login...');
 			
-			const response = await fetch('/api/auth/login', {
+			const response = await fetch(`${API_BASE_URL}/auth/login`, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'
@@ -156,7 +158,7 @@ class AuthService {
 			console.log('[AUTH] Logging out...');
 			
 			// Call logout endpoint to revoke refresh token
-			await fetch('/api/auth/logout', {
+			await fetch(`${API_BASE_URL}/auth/logout`, {
 				method: 'POST',
 				credentials: 'include'
 			});
@@ -178,7 +180,7 @@ class AuthService {
 	// Logout from all devices
 	async logoutAllDevices() {
 		try {
-			const response = await this.authenticatedFetch('/api/auth/logout-all', {
+			const response = await this.authenticatedFetch(`${API_BASE_URL}/auth/logout-all`, {
 				method: 'POST'
 			});
 			
