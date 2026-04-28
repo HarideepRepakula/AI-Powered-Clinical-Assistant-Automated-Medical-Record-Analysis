@@ -16,7 +16,8 @@ import { TranscriptModel }   from "../models/Transcript.js";
 import { UserModel }         from "../models/User.js";
 import {
 	runCdssCheck,
-	generateHealthInsights
+	generateHealthInsights,
+	generateMedicalRecordSummary
 } from "../services/ollamaService.js";
 
 // ─── Shared BART Python Bridge ──────────────────────────────────────────────────────
@@ -128,7 +129,32 @@ export async function getPreConsultSummary(req, res) {
 
 	} catch (error) {
 		console.error("Pre-consult summary error:", error.message);
-		res.status(500).json({ success: false, error: "BART Engine failed. Ensure Python and summarize.py are available." });
+		console.warn("BART failed, attempting cloud AI fallback...");
+		try {
+			const cloudResult = await generateMedicalRecordSummary(fullContext || "No records", "Combined Patient Context");
+			const updatePayload = {
+				$set: {
+					"aiPreparedSummary.content":     cloudResult.summary,
+					"aiPreparedSummary.generatedAt": new Date(),
+					"aiPreparedSummary.isLocked":    false
+				}
+			};
+			await AppointmentModel.findByIdAndUpdate(appointmentId, updatePayload);
+			return res.json({
+				success: true,
+				data: {
+					patientName:   patient.name,
+					appointmentId,
+					summary:       cloudResult.summary,
+					extractedMeds: [],
+					generatedAt:   new Date().toISOString(),
+					aiNote:        "Note: Summary generated via Cloud AI (BART fallback)."
+				}
+			});
+		} catch (fallbackErr) {
+			console.error("Cloud fallback also failed:", fallbackErr.message);
+			res.status(500).json({ success: false, error: "AI Engine failed. Please try again later." });
+		}
 	}
 }
 
@@ -245,7 +271,7 @@ export async function cdssCheck(req, res) {
 
 		const existingMedications = prescriptions.flatMap(p => p.medicines.map(m => `${m.name} ${m.dosage}`));
 
-		// ── Step 3: Ollama clinical reasoning (with graceful fallback) ────────
+		// ── Step 3: ClinIQ AI Engine clinical reasoning (with graceful fallback) ────────
 		let cdssResult;
 		try {
 			cdssResult = await runCdssCheck({
@@ -254,7 +280,7 @@ export async function cdssCheck(req, res) {
 				existingMedications
 			});
 		} catch (aiErr) {
-			console.warn("[CDSS] Ollama unavailable, using FDA-only fallback:", aiErr.message);
+			console.warn("[CDSS] ClinIQ AI Engine unavailable, using FDA-only fallback:", aiErr.message);
 			cdssResult = {
 				riskLevel:        fdaWarnings.length > 0 ? "caution" : "safe",
 				interactions:     [],
@@ -264,7 +290,7 @@ export async function cdssCheck(req, res) {
 					? `FDA data found for ${medicationName}. Review warnings below before prescribing.`
 					: `No FDA warnings found for "${medicationName}". Verify the drug name and consult clinical references.`,
 				requiresAttention: fdaWarnings.length > 0,
-				aiNote:           "⚠️ AI analysis unavailable (Ollama offline). Showing FDA data only."
+				aiNote:           "⚠️ AI analysis unavailable (ClinIQ AI Engine offline). Showing FDA data only."
 			};
 		}
 
@@ -345,6 +371,17 @@ export async function getBartSummary(req, res) {
 		res.json({ success: true, summary: result.summary, extractedMeds: result.extracted_meds || [] });
 	} catch (err) {
 		console.error("[BART] getBartSummary error:", err.message);
-		res.status(500).json({ success: false, error: "BART summarizer failed. Ensure Python and transformers are installed." });
+		console.warn("[BART] Falling back to cloud AI for document summary...");
+		try {
+			const cloudResult = await generateMedicalRecordSummary(text, "Document Upload");
+			res.json({ 
+				success: true, 
+				summary: cloudResult.summary, 
+				extractedMeds: [],
+				aiNote: "Generated via Cloud AI (BART fallback)."
+			});
+		} catch (fallbackErr) {
+			res.status(500).json({ success: false, error: "AI summarization failed. Please try again later." });
+		}
 	}
 }

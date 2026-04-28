@@ -225,12 +225,68 @@ export async function bookAppointment(req, res) {
 	}
 }
 
+/**
+ * Automatically marks appointments as 'no_show' if they are 
+ * more than 60 minutes past their start time and not completed/cancelled.
+ */
+async function autoMarkNoShows(userId, userRole) {
+	try {
+		const now = new Date();
+		const filter = {
+			status: { $in: ['pending', 'confirmed', 'in_progress'] },
+			appointmentDate: { $lte: now }
+		};
+
+		if (userRole === 'PATIENT') filter.patientId = userId;
+		else if (userRole === 'DOCTOR') filter.doctorId = userId;
+
+		const appointments = await AppointmentModel.find(filter).lean();
+		const updates = [];
+
+		for (const apt of appointments) {
+			const aptDt = buildAppointmentDateTime(apt.appointmentDate, apt.startTime);
+			const diffMinutes = (now.getTime() - aptDt.getTime()) / 60000;
+
+			// If > 60 mins past start and still pending/confirmed
+			// OR if > 120 mins past start and still in_progress
+			if (
+				(['pending', 'confirmed'].includes(apt.status) && diffMinutes > 60) ||
+				(apt.status === 'in_progress' && diffMinutes > 120)
+			) {
+				updates.push(
+					AppointmentModel.findByIdAndUpdate(apt._id, {
+						$set: { status: 'no_show' },
+						$push: {
+							statusHistory: {
+								status: 'no_show',
+								changedAt: new Date(),
+								reason: 'Auto-marked as no-show due to elapsed time without completion.'
+							}
+						},
+						$inc: { version: 1 }
+					})
+				);
+			}
+		}
+
+		if (updates.length > 0) {
+			await Promise.all(updates);
+			console.log(`[CLEANUP] Auto-marked ${updates.length} appointments as no_show`);
+		}
+	} catch (err) {
+		console.error('[CLEANUP] autoMarkNoShows failed:', err.message);
+	}
+}
+
 // ─── Get Appointments ────────────────────────────────────────────────────────
 
 export async function getAppointments(req, res) {
 	try {
 		const userId   = req.user.userId;
 		const userRole = req.user.role;
+
+		// Cleanup unattended/expired appointments first
+		await autoMarkNoShows(userId, userRole);
 
 		// Pagination parameters
 		const page  = Math.max(1, parseInt(req.query.page) || 1);

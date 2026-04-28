@@ -117,7 +117,7 @@ function RescheduleCancelModal({ appointment, onClose, onDone }) {
 }
 
 function DoctorRecentConsultations({ appointments, onViewRecords }) {
-	const completed = appointments.filter(a => a.status === 'completed');
+	const completed = appointments.filter(a => ['completed', 'no_show'].includes(a.status));
 
 	if (completed.length === 0) return (
 		<div className="card">
@@ -410,7 +410,7 @@ export default function DoctorDashboard() {
 	function backFromConsultView() { setConsultView(null); setActiveTab('appointments'); loadAppointments(); loadPatients(); }
 	function backFromRecordsView() { setRecordsView(null); setActiveTab('appointments'); }
 
-	const upcomingAppointments = appointments.filter(a => a.status !== 'completed' && a.status !== 'cancelled');
+	const upcomingAppointments = appointments.filter(a => ['pending', 'confirmed', 'in_progress'].includes(a.status));
 
 	// Null guard — wait for JWT decode before rendering
 	if (!currentUser) return (
@@ -485,8 +485,12 @@ export default function DoctorDashboard() {
 										<p className="text-xs text-text-secondary">{apt.startTime} — {apt.reason}</p>
 									</div>
 									<div className="flex items-center gap-2">
-										<span className={`badge ${apt.status === 'confirmed' ? 'badge-success' : apt.status === 'pending' ? 'badge-amber' : 'badge-gray'}`}>
-											{apt.status?.toUpperCase()}
+										<span className={`badge ${
+											apt.status === 'confirmed' ? 'badge-success' : 
+											apt.status === 'no_show'   ? 'badge-danger'  : 
+											apt.status === 'pending'   ? 'badge-amber'   : 'badge-gray'
+										}`}>
+											{apt.status?.toUpperCase().replace('_', ' ')}
 										</span>
 										{apt.status === 'confirmed' && (
 											<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700 animate-pulse-soft">
@@ -543,8 +547,9 @@ export default function DoctorDashboard() {
 												<div className="flex flex-col gap-1">
 												<span className={`badge ${
 													apt.status === 'confirmed'   ? 'badge-success' :
-													apt.status === 'in_progress' ? 'badge-ai' : 'badge-amber'
-												}`}>{apt.status?.toUpperCase()}</span>
+													apt.status === 'no_show'     ? 'badge-danger'  :
+													apt.status === 'in_progress' ? 'badge-ai'      : 'badge-amber'
+												}`}>{apt.status?.toUpperCase().replace('_', ' ')}</span>
 												{apt.status === 'confirmed' && (
 													<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700 animate-pulse-soft">
 														🟢 Patient Ready

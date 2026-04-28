@@ -22,7 +22,7 @@ function RichAiSummary({ data, summaryError, loadingSummary }) {
 			))}
 			<p className="text-xs text-ai-500 flex items-center gap-1.5 mt-3">
 				<span className="w-3 h-3 border-2 border-ai-300 border-t-ai-600 rounded-full animate-spin inline-block" />
-				Generating AI summary… (Ollama may take 15–40s on first load)
+				Generating AI summary… (ClinIQ AI Engine powered by Groq/BART)
 			</p>
 		</div>
 	);
@@ -135,6 +135,7 @@ export default function ConsultationPrep({ appointment, onBack }) {
 	const [scribeText, setScribeText]       = useState('');
 	const [scribeDuration, setScribeDuration] = useState(0);
 	const [scribeListening, setScribeListening] = useState(false);
+	const [micError, setMicError]           = useState('');
 	const fileInputRef     = useRef(null);
 	const mediaRecorderRef = useRef(null);
 	const audioChunksRef   = useRef([]);
@@ -166,7 +167,7 @@ export default function ConsultationPrep({ appointment, onBack }) {
 		setLoadingSummary(true);
 		setSummaryError('');
 
-		// Retry up to 2 times with 5s delay — Ollama can be slow on first load
+		// Retry up to 2 times with 5s delay — AI engine can be slow on first load
 		const MAX_RETRIES = 2;
 		let lastError = null;
 
@@ -176,7 +177,7 @@ export default function ConsultationPrep({ appointment, onBack }) {
 				const res = await Promise.race([
 					apiService.getAiSummary(appointment.id),
 					new Promise((_, reject) =>
-						setTimeout(() => reject(new Error('AI summary timed out. Ollama may be slow — try again.')), 90000)
+						setTimeout(() => reject(new Error('AI summary timed out. Engine may be slow — try again.')), 90000)
 					)
 				]);
 				if (res.success) {
@@ -202,7 +203,7 @@ export default function ConsultationPrep({ appointment, onBack }) {
 		// All retries exhausted
 		setSummaryError(
 			lastError?.message?.includes('timed out')
-				? 'AI summary timed out. Ollama may still be loading the model. Try refreshing in 30 seconds.'
+				? 'AI summary timed out. The engine may still be initializing. Try refreshing in 30 seconds.'
 				: 'Could not load AI summary. Using default discussion points.'
 		);
 		setEditablePoints([
@@ -277,6 +278,7 @@ export default function ConsultationPrep({ appointment, onBack }) {
 	}
 
 	async function startRecording() {
+		setMicError('');
 		try {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 			const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
@@ -292,14 +294,20 @@ export default function ConsultationPrep({ appointment, onBack }) {
 					let final = '';
 					for (let x = e.resultIndex; x < e.results.length; x++) {
 						if (e.results[x].isFinal) {
-							final += e.results[x][0].transcript + ' ';
-							scribeSegments.current.push({ speaker: 'patient', text: e.results[x][0].transcript.trim(), timestamp: new Date().toISOString() });
+							const text = e.results[x][0].transcript.trim();
+							final += text + ' ';
+							scribeSegments.current.push({ speaker: 'patient', text, timestamp: new Date().toISOString() });
 						}
 					}
 					if (final) {
 						scribeTextRef.current += final;
 						setScribeText(scribeTextRef.current);
 					}
+				};
+				rec.onerror = (e) => {
+					console.error('Speech recognition error:', e.error);
+					if (e.error === 'no-speech') return;
+					setMicError(`Transcription error: ${e.error}`);
 				};
 				rec.start();
 				scribeRef.current = rec;
@@ -308,8 +316,13 @@ export default function ConsultationPrep({ appointment, onBack }) {
 					setScribeDuration(d => d + 1);
 				}, 1000);
 				setScribeListening(true);
+			} else {
+				setMicError('Live transcription is not supported in this browser. Use Chrome or Edge for best results.');
 			}
-		} catch (err) { console.error('Could not start recording:', err); }
+		} catch (err) {
+			console.error('Could not start recording:', err);
+			setMicError('Could not access microphone. Please ensure permissions are granted.');
+		}
 	}
 
 	function stopRecording() {
@@ -368,6 +381,7 @@ export default function ConsultationPrep({ appointment, onBack }) {
 			'uploads-locked': { bg: 'bg-amber-50 border-amber-200',      icon: '📎', title: 'Uploads Locked — Summary Still Editable', text: `Meeting opens soon. You can still edit summary points.` },
 			'summary-locked': { bg: 'bg-ai-50 border-ai-200',            icon: '🔒', title: 'Summary Locked & Shared with Doctor',  text: 'Your summary has been shared with the doctor. Meeting is ready to join.' },
 			'active':         { bg: 'bg-success-50 border-success-200',  icon: '🟢', title: 'Consultation In Progress',             text: 'Your appointment has started.' },
+			'expired':        { bg: 'bg-danger-50 border-danger-200',    icon: '⚠️', title: 'Consultation Time Expired',           text: 'Meeting didn\'t happen as scheduled. Please contact your doctor or reschedule.' },
 			'completed':      { bg: 'bg-gray-50 border-gray-200',        icon: '✅', title: 'Consultation Completed',               text: 'View your records in the Recent Consultations section.' },
 		};
 		const c = configs[timer.phase] || configs.waiting;
@@ -379,7 +393,11 @@ export default function ConsultationPrep({ appointment, onBack }) {
 					<p className="text-xs text-text-secondary mt-0.5">{c.text}</p>
 				</div>
 				<div className="text-right shrink-0">
-					<div className={`text-lg font-bold font-mono ${timer.minutesUntilStart <= 5 ? 'text-danger-500 animate-pulse-soft' : 'text-primary-600'}`}>
+					<div className={`text-lg font-bold font-mono ${
+						timer.minutesUntilStart <= 5 && !timer.isStarted 
+							? 'text-danger-500 animate-pulse-soft' 
+							: timer.isStarted ? 'text-success-600' : 'text-primary-600'
+					}`}>
 						{timer.formattedCountdown}
 					</div>
 					<p className="text-[10px] text-text-secondary uppercase tracking-wider">
@@ -547,6 +565,11 @@ export default function ConsultationPrep({ appointment, onBack }) {
 								<span className="text-lg">🎥</span>
 								<h3 className="font-semibold text-text-primary">Video Consultation</h3>
 							</div>
+							{micError && (
+								<div className="bg-danger-50 border border-danger-200 text-danger-700 px-3 py-2 rounded-clinical text-xs mb-3 flex items-center gap-2">
+									<span>⚠️</span> {micError}
+								</div>
+							)}
 							{meetingActive && (
 								<span className="badge-danger text-[10px] animate-pulse-soft">
 									<span className="w-2 h-2 rounded-full bg-danger-500" /> Auto Recording
@@ -574,6 +597,19 @@ export default function ConsultationPrep({ appointment, onBack }) {
 												The video consultation will be available 15 minutes before your scheduled time.
 											</p>
 										</div>
+									</>
+								) : timer.phase === 'expired' ? (
+									<>
+										<div className="relative w-full aspect-video bg-gray-50 rounded-clinical mb-5 flex items-center justify-center border border-dashed border-gray-300 overflow-hidden">
+											<div className="relative z-10 text-center">
+												<span className="text-5xl block mb-3 opacity-30">⚠️</span>
+												<p className="text-sm font-semibold text-text-secondary">Consultation Expired</p>
+												<p className="text-xs text-text-secondary mt-1">This session is no longer active</p>
+											</div>
+										</div>
+										<button disabled className="btn-secondary btn-lg w-full cursor-not-allowed opacity-60">
+											🎥 Meeting Closed
+										</button>
 									</>
 								) : (
 									<>

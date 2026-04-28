@@ -79,7 +79,11 @@ function computeState(appointmentDate, startTime, status) {
 	// Determine phase
 	let phase = 'waiting';
 	if (isCompleted) phase = 'completed';
-	else if (isStarted) phase = 'active';
+	else if (isStarted) {
+		const elapsedMin = Math.abs(diffMinutes);
+		if (elapsedMin > 60) phase = 'expired';
+		else phase = 'active';
+	}
 	else if (summaryLocked) phase = 'summary-locked';
 	else if (uploadsLocked) phase = 'uploads-locked';
 

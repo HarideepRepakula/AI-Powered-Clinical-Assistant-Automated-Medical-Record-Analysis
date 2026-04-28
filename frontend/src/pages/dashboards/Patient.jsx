@@ -347,8 +347,12 @@ export default function PatientDashboard() {
 										</p>
 										<p className="text-xs text-text-secondary">{apt.date} • {apt.startTime || apt.time}</p>
 									</div>
-									<span className={`badge ${apt.status === 'confirmed' ? 'badge-success' : apt.status === 'completed' ? 'badge-gray' : 'badge-amber'}`}>
-										{apt.status?.toUpperCase()}
+									<span className={`badge ${
+										apt.status === 'confirmed' ? 'badge-success' : 
+										apt.status === 'completed' ? 'badge-gray'    : 
+										apt.status === 'no_show'   ? 'badge-danger'  : 'badge-amber'
+									}`}>
+										{apt.status?.toUpperCase().replace('_', ' ')}
 									</span>
 								</div>
 							)) : (

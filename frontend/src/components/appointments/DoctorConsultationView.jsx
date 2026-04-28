@@ -306,15 +306,10 @@ export default function DoctorConsultationView({ appointment, onBack }) {
 	const [meetingActive, setMeetingActive] = useState(false);
 	const [isRecording, setIsRecording]     = useState(false);
 	// AI Scribe state
-	const [scribeText, setScribeText]       = useState('');
-	const [scribeSaved, setScribeSaved]     = useState(false);
-	const mediaRecorderRef = useRef(null);
-	const audioChunksRef   = useRef([]);
-	const scribeRef        = useRef(null);
-	const scribeTimerRef   = useRef(null);
-	const scribeSegments   = useRef([]);
-	const [scribeDuration, setScribeDuration] = useState(0);
 	const [scribeListening, setScribeListening] = useState(false);
+	const [micError, setMicError]           = useState('');
+	const scribeTextRef = useRef(''); // Use ref to avoid stale closures in callbacks
+	const scribeDurRef  = useRef(0);
 	const SpeechRecognition = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
 
 	const timer = useConsultationTimer(
@@ -368,6 +363,7 @@ export default function DoctorConsultationView({ appointment, onBack }) {
 		: null;
 
 	async function startRecording() {
+		setMicError('');
 		try {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 			const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
@@ -384,18 +380,35 @@ export default function DoctorConsultationView({ appointment, onBack }) {
 					let final = '';
 					for (let x = e.resultIndex; x < e.results.length; x++) {
 						if (e.results[x].isFinal) {
-							final += e.results[x][0].transcript + ' ';
-							scribeSegments.current.push({ speaker: 'doctor', text: e.results[x][0].transcript.trim(), timestamp: new Date().toISOString() });
+							const text = e.results[x][0].transcript.trim();
+							final += text + ' ';
+							scribeSegments.current.push({ speaker: 'doctor', text, timestamp: new Date().toISOString() });
 						}
 					}
-					if (final) setScribeText(p => p + final);
+					if (final) {
+						scribeTextRef.current += final;
+						setScribeText(scribeTextRef.current);
+					}
+				};
+				rec.onerror = (e) => {
+					console.error('Speech recognition error:', e.error);
+					if (e.error === 'no-speech') return;
+					setMicError(`Transcription error: ${e.error}`);
 				};
 				rec.start();
 				scribeRef.current = rec;
-				scribeTimerRef.current = setInterval(() => setScribeDuration(d => d + 1), 1000);
+				scribeTimerRef.current = setInterval(() => {
+					scribeDurRef.current += 1;
+					setScribeDuration(scribeDurRef.current);
+				}, 1000);
 				setScribeListening(true);
+			} else {
+				setMicError('Live transcription is not supported in this browser. Use Chrome or Edge for best results.');
 			}
-		} catch (err) { console.error('Recording failed:', err); }
+		} catch (err) {
+			console.error('Recording failed:', err);
+			setMicError('Could not access microphone. Please ensure permissions are granted and no other app is using it.');
+		}
 	}
 
 	function stopRecording() {
@@ -415,21 +428,23 @@ export default function DoctorConsultationView({ appointment, onBack }) {
 	async function endMeeting() {
 		stopRecording();
 		setMeetingActive(false);
+		const finalText = scribeTextRef.current.trim();
+		const finalDur  = scribeDurRef.current;
 		try {
 			// Save transcript first if we have scribe text
-			if (scribeText.trim()) {
+			if (finalText) {
 				await apiService.saveTranscript({
 					appointmentId: appointment.id,
-					rawText: scribeText,
+					rawText: finalText,
 					segments: scribeSegments.current,
-					durationSeconds: scribeDuration
+					durationSeconds: finalDur
 				});
 				setScribeSaved(true);
 			}
 			// Complete consultation with actual transcript
 			await apiService.completeConsultation(appointment.id, {
-				rawText: scribeText || '[Meeting completed — no transcript captured]',
-				durationSeconds: scribeDuration,
+				rawText: finalText || '[Meeting completed — no transcript captured]',
+				durationSeconds: finalDur,
 				hasAudio: audioChunksRef.current.length > 0
 			});
 		} catch (err) { console.error('End meeting error:', err); }
@@ -609,6 +624,11 @@ export default function DoctorConsultationView({ appointment, onBack }) {
 								<span className="text-lg">🎥</span>
 								<h3 className="font-semibold text-text-primary">Video Consultation Room</h3>
 							</div>
+							{micError && (
+								<div className="bg-danger-50 border border-danger-200 text-danger-700 px-3 py-2 rounded-clinical text-xs mb-3 flex items-center gap-2">
+									<span>⚠️</span> {micError}
+								</div>
+							)}
 							{isRecording && (
 								<span className="badge-danger text-[10px] animate-pulse-soft">
 									<span className="w-2 h-2 rounded-full bg-danger-500" /> Recording

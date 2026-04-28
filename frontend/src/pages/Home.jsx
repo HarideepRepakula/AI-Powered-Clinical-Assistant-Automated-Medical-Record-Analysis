@@ -72,7 +72,7 @@ export default function Home() {
 						{ icon: '📋', title: 'Smart Records', desc: 'Upload lab reports and get instant OCR parsing with structured data visualization and trend tracking.', badge: null },
 						{ icon: '💊', title: 'Pharmacy Automation', desc: 'Auto-generated medicine carts from prescriptions, with real-time order tracking and inventory matching.', badge: null },
 						{ icon: '🎙️', title: 'AI Medical Scribe', desc: 'Real-time voice transcription during consultations using Web Speech API — no cost, no setup.', badge: 'AI Assisted' },
-						{ icon: '🛡️', title: 'Drug Safety (CDSS)', desc: 'Clinical decision support with OpenFDA integration and Ollama analysis for drug interactions.', badge: 'AI Assisted' },
+						{ icon: '🛡️', title: 'Drug Safety (CDSS)', desc: 'Clinical decision support with OpenFDA integration and Groq analysis for drug interactions.', badge: 'AI Assisted' },
 						{ icon: '📊', title: 'Health Timeline', desc: 'Track lab values over time with interactive charts, color-coded flags, and trend analysis.', badge: null },
 					].map((f, i) => (
 						<div key={i} className={`card hover:shadow-clinical-md transition-shadow duration-300 ${f.badge ? 'border-ai-100' : ''}`}>

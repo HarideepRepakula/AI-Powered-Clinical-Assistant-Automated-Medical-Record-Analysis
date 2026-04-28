@@ -1,5 +1,5 @@
 export default function RecentConsultations({ appointments, onViewRecords }) {
-	const completed = appointments.filter(a => a.status === 'completed');
+	const completed = appointments.filter(a => ['completed', 'no_show'].includes(a.status));
 
 	if (completed.length === 0) {
 		return (

@@ -88,7 +88,7 @@ export default function CDSSAlert({ medicationName, patientId, onClose }) {
 			{loading && (
 				<div className="flex items-center gap-2 text-sm text-text-secondary">
 					<div className="w-4 h-4 border-2 border-gray-200 border-t-ai-500 rounded-full animate-spin" />
-					Running OpenFDA + Ollama analysis…
+					Running OpenFDA + Groq analysis…
 				</div>
 			)}
 

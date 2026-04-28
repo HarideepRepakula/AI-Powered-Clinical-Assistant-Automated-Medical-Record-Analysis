@@ -105,7 +105,7 @@ export default function AdminDashboard() {
 							{[
 								{ name: 'API Server',  status: 'Healthy',   uptime: '99.9%' },
 								{ name: 'MongoDB',     status: 'Connected', uptime: '99.8%' },
-								{ name: 'Ollama AI',   status: 'Active',    uptime: '98.5%' },
+								{ name: 'Groq Cloud AI',   status: 'Active',    uptime: '99.9%' },
 								{ name: 'OCR Service', status: 'Running',   uptime: '99.2%' },
 							].map((svc, i) => (
 								<div key={i} className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
