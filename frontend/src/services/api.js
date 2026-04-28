@@ -20,7 +20,11 @@ class ApiService {
 
 		// Public endpoints
 		const config = {
-			headers: { 'Content-Type': 'application/json', ...options.headers },
+			headers: { 
+				'Content-Type': 'application/json', 
+				'Bypass-Tunnel-Reminder': 'true',
+				...options.headers 
+			},
 			credentials: 'include',
 			...options,
 		};
@@ -136,7 +140,10 @@ class ApiService {
 		const token    = authService.getAccessToken();
 		const response = await fetch(url, {
 			method:      'POST',
-			headers:     token ? { Authorization: `Bearer ${token}` } : {},
+			headers:     { 
+				'Bypass-Tunnel-Reminder': 'true',
+				...(token ? { Authorization: `Bearer ${token}` } : {})
+			},
 			credentials: 'include',
 			body:        fd
 		});
@@ -162,7 +169,10 @@ class ApiService {
 		const token    = authService.getAccessToken();
 		const response = await fetch(url, {
 			method:      'POST',
-			headers:     token ? { Authorization: `Bearer ${token}` } : {},
+			headers:     { 
+				'Bypass-Tunnel-Reminder': 'true',
+				...(token ? { Authorization: `Bearer ${token}` } : {})
+			},
 			credentials: 'include',
 			body:        fd,
 		});
@@ -192,7 +202,10 @@ class ApiService {
 		const token = authService.getAccessToken();
 		const response = await fetch(url, {
 			method:      'POST',
-			headers:     token ? { Authorization: `Bearer ${token}` } : {},
+			headers:     { 
+				'Bypass-Tunnel-Reminder': 'true',
+				...(token ? { Authorization: `Bearer ${token}` } : {})
+			},
 			credentials: 'include',
 			body:        formData
 		});
@@ -273,7 +286,10 @@ class ApiService {
 		const token    = authService.getAccessToken();
 		const response = await fetch(url, {
 			method:      'POST',
-			headers:     token ? { Authorization: `Bearer ${token}` } : {},
+			headers:     { 
+				'Bypass-Tunnel-Reminder': 'true',
+				...(token ? { Authorization: `Bearer ${token}` } : {})
+			},
 			credentials: 'include',
 			body:        fd
 		});

@@ -78,7 +78,8 @@ class AuthService {
 				method: 'POST',
 				credentials: 'include', // Include httpOnly cookies
 				headers: {
-					'Content-Type': 'application/json'
+					'Content-Type': 'application/json',
+					'Bypass-Tunnel-Reminder': 'true'
 				}
 			});
 
@@ -125,7 +126,8 @@ class AuthService {
 			const response = await fetch(`${API_BASE_URL}/auth/login`, {
 				method: 'POST',
 				headers: {
-					'Content-Type': 'application/json'
+					'Content-Type': 'application/json',
+					'Bypass-Tunnel-Reminder': 'true'
 				},
 				credentials: 'include', // Include cookies
 				body: JSON.stringify(credentials)
@@ -160,7 +162,8 @@ class AuthService {
 			// Call logout endpoint to revoke refresh token
 			await fetch(`${API_BASE_URL}/auth/logout`, {
 				method: 'POST',
-				credentials: 'include'
+				credentials: 'include',
+				headers: { 'Bypass-Tunnel-Reminder': 'true' }
 			});
 			
 		} catch (error) {
@@ -216,6 +219,7 @@ class AuthService {
 		// Add authorization header
 		const headers = {
 			'Content-Type': 'application/json',
+			'Bypass-Tunnel-Reminder': 'true',
 			...options.headers
 		};
 
