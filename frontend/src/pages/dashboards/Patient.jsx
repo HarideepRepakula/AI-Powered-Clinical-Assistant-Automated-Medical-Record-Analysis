@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import jsPDF from 'jspdf';
 import AppLayout from '../../layouts/AppLayout.jsx';
 import UpcomingAppointments from '../../components/appointments/UpcomingAppointments.jsx';
 import RecentConsultations from '../../components/appointments/RecentConsultations.jsx';
@@ -27,7 +28,7 @@ export default function PatientDashboard() {
 	const [selectedAppointment, setSelectedAppointment] = useState(null);
 	const [subView, setSubView] = useState(null); // 'consultation-prep' | 'consultation-records'
 
-	// Booking modal –” step machine: 'form' | 'payment' | 'success'
+	// Booking modal - step machine: 'form' | 'payment' | 'success'
 	const [bookingDoctor, setBookingDoctor]     = useState(null);
 	const [bookingStep, setBookingStep]         = useState('form');
 	const [bookingForm, setBookingForm]         = useState({ date: '', startTime: '', endTime: '', reason: '' });
@@ -44,6 +45,7 @@ export default function PatientDashboard() {
 	const [uploading, setUploading]           = useState(false);
 	const [uploadModal, setUploadModal]       = useState(false);
 	const [uploadForm, setUploadForm]         = useState({ recordName: '', type: 'Lab Report', file: null });
+	const [viewRecord, setViewRecord]         = useState(null);
 	const [bills, setBills]                   = useState([
 		{ id: 1, title: 'Consultation Fee', amount: 500,  status: 'paid',    date: '2025-01-20' },
 		{ id: 2, title: 'Pharmacy Order',   amount: 1250, status: 'pending', date: '2025-01-22' }
@@ -97,6 +99,38 @@ export default function PatientDashboard() {
 		} finally { setUploading(false); }
 	};
 
+	const downloadAiReport = (record) => {
+		const doc = new jsPDF();
+		doc.setFillColor(40, 116, 240);
+		doc.rect(0, 0, 210, 40, 'F');
+		doc.setTextColor(255, 255, 255);
+		doc.setFontSize(22);
+		doc.text('ClinIQ AI Medical Report', 20, 28);
+		doc.setTextColor(0, 0, 0);
+		doc.setFontSize(10);
+		doc.setFont('helvetica', 'bold');
+		doc.text('REPORT INFORMATION', 20, 55);
+		doc.setFont('helvetica', 'normal');
+		doc.text(`File Name: ${record.recordName}`, 20, 65);
+		doc.text(`Category: ${record.fileType}`, 20, 72);
+		doc.text(`Analysis Date: ${new Date().toLocaleDateString()}`, 20, 79);
+		doc.setDrawColor(200, 200, 200);
+		doc.line(20, 85, 190, 85);
+		doc.setFont('helvetica', 'bold');
+		doc.setFontSize(12);
+		doc.text('Clinical Summary & Insights:', 20, 95);
+		doc.setFont('helvetica', 'normal');
+		doc.setFontSize(11);
+		doc.setTextColor(60, 60, 60);
+		const splitText = doc.splitTextToSize(record.aiSummary || 'No summary available.', 170);
+		doc.text(splitText, 20, 105);
+		doc.setFontSize(8);
+		doc.setTextColor(150, 150, 150);
+		doc.text('Disclaimer: This is an AI-generated summary by the ClinIQ BART-Large engine.', 20, 280);
+		doc.text('Please consult a licensed physician for final medical diagnosis.', 20, 285);
+		doc.save(`ClinIQ_Report_${record.recordName.replace(/\s+/g, '_')}.pdf`);
+	};
+
 	const handleDeleteRecord = async (id) => {
 		try {
 			await apiService.deleteMedicalRecord(id);
@@ -139,7 +173,7 @@ export default function PatientDashboard() {
 
 	const showToast = (message, type) => { setToast({ message, type }); setTimeout(() => setToast(null), 3000); };
 
-	// â”€â”€ Sub-view navigation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+	// ── Sub-view navigation ───────────────────────────────────────
 	function openConsultationPrep(apt) {
 		setSelectedAppointment(apt);
 		setSubView('consultation-prep');
@@ -163,12 +197,12 @@ export default function PatientDashboard() {
 		if (tab === 'records') { loadLabResults(); loadMedicalRecords(); }
 	}
 
-	// â”€â”€ Booking logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+	// ── Booking logic ─────────────────────────────────────────
 	const VISIT_TYPES = [
 		{ value: 'regular',    label: 'Regular Checkup',    icon: '🩺', desc: 'Routine health checkup' },
-		{ value: 'follow-up',  label: 'Follow-up Visit',    icon: '📝”„', desc: 'Follow-up on previous consultation' },
+		{ value: 'follow-up',  label: 'Follow-up Visit',    icon: '🔄', desc: 'Follow-up on previous consultation' },
 		{ value: 'emergency',  label: 'Urgent Consultation',icon: '🚨', desc: 'Urgent medical concern' },
-		{ value: 'specialist', label: 'Specialist Referral', icon: '📝”¬', desc: 'Referred by another doctor' },
+		{ value: 'specialist', label: 'Specialist Referral', icon: '🔗', desc: 'Referred by another doctor' },
 	];
 
 	function openBookingModal(doc) {
@@ -232,7 +266,7 @@ export default function PatientDashboard() {
 
 	const TIME_SLOTS = (() => {
 		const slots = [];
-		for (let h = 9; h < 17; h++) {
+		for (let h = 9; h < 23; h++) {
 			for (const m of [0, 30]) {
 				const start = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 				const endM = m + 30;
@@ -273,7 +307,7 @@ export default function PatientDashboard() {
 				</div>
 			)}
 
-			{/* â”€â”€ DASHBOARD TAB â”€â”€ */}
+			{/* ── DASHBOARD TAB ── */}
 			{activeTab === 'dashboard' && (
 				<div className="space-y-6 animate-fade-in">
 					<div>
@@ -284,10 +318,10 @@ export default function PatientDashboard() {
 					{/* KPI Cards */}
 					<div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 						{[
-							{ label: 'Appointments', value: appointments.length, icon: '📝“…', color: 'text-primary-600', bg: 'bg-primary-50' },
-							{ label: 'Medical Records', value: labResults.length, icon: '📝“‹', color: 'text-success-600', bg: 'bg-success-50' },
-							{ label: 'Pending Bills', value: `₹${bills.filter(b=>b.status==='pending').reduce((s,b)=>s+b.amount,0)}`, icon: '📝’³', color: 'text-amber-600', bg: 'bg-amber-50' },
-							{ label: 'AI Assistant', value: 'Active', icon: '📝§ ', color: 'text-ai-600', bg: 'bg-ai-50' },
+							{ label: 'Appointments', value: appointments.length, icon: '📅', color: 'text-primary-600', bg: 'bg-primary-50' },
+							{ label: 'Medical Records', value: labResults.length, icon: '📋', color: 'text-success-600', bg: 'bg-success-50' },
+							{ label: 'Pending Bills', value: `₹${bills.filter(b=>b.status==='pending').reduce((s,b)=>s+b.amount,0)}`, icon: '💳', color: 'text-amber-600', bg: 'bg-amber-50' },
+							{ label: 'AI Assistant', value: 'Active', icon: '🤖', color: 'text-ai-600', bg: 'bg-ai-50' },
 						].map((kpi, i) => (
 							<div key={i} className="card-stat">
 								<div className={`w-12 h-12 ${kpi.bg} rounded-clinical flex items-center justify-center text-xl shrink-0`}>
@@ -319,7 +353,7 @@ export default function PatientDashboard() {
 								</div>
 							)) : (
 								<div className="text-center py-8 text-text-secondary text-sm">
-									<span className="text-3xl block mb-2">📝“…</span>
+									<span className="text-3xl block mb-2">📅</span>
 									No appointments scheduled
 								</div>
 							)}
@@ -348,7 +382,7 @@ export default function PatientDashboard() {
 				</div>
 			)}
 
-			{/* â”€â”€ DOCTORS TAB â”€â”€ */}
+			{/* ── DOCTORS TAB ── */}
 			{activeTab === 'doctors' && (
 				<div className="space-y-6 animate-fade-in">
 					<h1 className="text-2xl font-bold">Find Doctors</h1>
@@ -386,8 +420,32 @@ export default function PatientDashboard() {
 						))}
 					</div>
 
-					{/* â”€â”€ Booking Modal â”€â”€ */}
-					{bookingDoctor && (
+					{/* ── Booking Modal ── */}
+					{bookingDoctor && bookingStep === 'success' && bookedInfo && (
+						<div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+							<div className="bg-white rounded-2xl shadow-clinical-lg w-full max-w-md p-8 text-center animate-slide-up">
+								<div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
+									<svg viewBox="0 0 52 52" className="w-9 h-9" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none"><path d="M14 27l8 8 16-16" /></svg>
+								</div>
+								<h2 className="text-xl font-bold text-gray-900 mb-2">Appointment Confirmed! 🎉</h2>
+								<p className="text-sm text-gray-500 mb-5">Your appointment with <strong>{bookedInfo.doctorName}</strong> has been successfully scheduled.</p>
+								<div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-left space-y-2.5 mb-4">
+									<div className="flex justify-between text-sm"><span className="text-gray-500 font-medium">Time</span><span className="text-gray-800">{bookedInfo.time}</span></div>
+									<div className="flex justify-between text-sm"><span className="text-gray-500 font-medium">Date</span><span className="text-gray-800">{bookedInfo.date}</span></div>
+									<div className="flex justify-between text-sm"><span className="text-gray-500 font-medium">Visit Type</span><span className="text-gray-800">{bookedInfo.visitType}</span></div>
+									<div className="flex justify-between text-sm"><span className="text-gray-500 font-medium">Fee</span><span className="text-gray-800">₹{bookingDoctor.consultationFee || 2000} <span className="text-gray-400 text-xs">(at clinic)</span></span></div>
+									{bookingForm.uploadedFile && <div className="flex justify-between text-sm"><span className="text-gray-500 font-medium">Record</span><span className="text-gray-800 truncate max-w-[180px]">{bookingForm.uploadedFile.name}</span></div>}
+								</div>
+								<p className="text-xs text-gray-400 mb-5">A confirmation has been sent to your registered email/mobile.</p>
+								<div className="flex flex-col gap-2">
+									<button onClick={() => { closeBookingModal(); handleTabChange('appointments'); }} className="btn-primary w-full">View My Bookings</button>
+									<button onClick={closeBookingModal} className="text-sm text-gray-400 hover:text-gray-600 underline py-1">Done</button>
+								</div>
+							</div>
+						</div>
+					)}
+
+		{bookingDoctor && bookingStep === 'form' && (
 						<div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={() => setBookingDoctor(null)}>
 							<div className="bg-white rounded-2xl shadow-clinical-lg w-full max-w-lg p-0 animate-slide-up max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
 								{/* Header */}
@@ -403,7 +461,7 @@ export default function PatientDashboard() {
 								</div>
 
 								<div className="px-6 py-5 space-y-5">
-									{/* â”€â”€ Visit Type â”€â”€ */}
+									{/* ── Visit Type ── */}
 									<div>
 										<label className="block text-sm font-semibold text-text-primary mb-2">Visit Type</label>
 										<div className="grid grid-cols-2 gap-2">
@@ -424,9 +482,9 @@ export default function PatientDashboard() {
 										</div>
 									</div>
 
-									{/* â”€â”€ Date â”€â”€ */}
+									{/* ── Date ── */}
 									<div>
-										<label className="block text-sm font-semibold text-text-primary mb-2">📝“… Preferred Date</label>
+										<label className="block text-sm font-semibold text-text-primary mb-2">📅 Preferred Date</label>
 										<input type="date" className="input w-full"
 											min={TODAY}
 											value={bookingForm.date}
@@ -457,8 +515,25 @@ export default function PatientDashboard() {
 										<div className="mb-1.5">
 											<span className="text-xs text-text-secondary font-medium">Afternoon</span>
 										</div>
+										<div className="grid grid-cols-4 gap-1.5 mb-3">
+											{availableSlots.filter(s => parseInt(s.start) >= 12 && parseInt(s.start) < 17).map(slot => (
+												<button key={slot.start} type="button"
+													className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all ${
+														bookingForm.startTime === slot.start
+															? 'bg-primary-600 text-white border-primary-600 shadow-sm'
+															: 'bg-white text-text-secondary border-gray-200 hover:border-primary-300 hover:bg-primary-50'
+													}`}
+													onClick={() => setBookingForm(f => ({ ...f, startTime: slot.start, endTime: slot.end }))}
+												>
+													{slot.label}
+												</button>
+											))}
+										</div>
+										<div className="mb-1.5">
+											<span className="text-xs text-text-secondary font-medium">Evening</span>
+										</div>
 										<div className="grid grid-cols-4 gap-1.5">
-											{availableSlots.filter(s => parseInt(s.start) >= 12).map(slot => (
+											{availableSlots.filter(s => parseInt(s.start) >= 17).map(slot => (
 												<button key={slot.start} type="button"
 													className={`py-2 px-1 rounded-lg text-xs font-medium border transition-all ${
 														bookingForm.startTime === slot.start
@@ -483,9 +558,9 @@ export default function PatientDashboard() {
 										/>
 									</div>
 
-									{/* â”€â”€ Upload Medical Records (Optional) â”€â”€ */}
+									{/* ── Upload Medical Records (Optional) ── */}
 									<div>
-										<label className="block text-sm font-semibold text-text-primary mb-2">📝“Ž Upload Medical Records <span className="text-text-secondary font-normal">(optional)</span></label>
+										<label className="block text-sm font-semibold text-text-primary mb-2">📂 Upload Medical Records <span className="text-text-secondary font-normal">(optional)</span></label>
 										{bookingForm.uploadedFile ? (
 											<div className="flex items-center gap-2 bg-success-50 border border-success-200 rounded-lg px-3 py-2">
 												<span className="text-success-600">✅</span>
@@ -495,7 +570,7 @@ export default function PatientDashboard() {
 											</div>
 										) : (
 											<label className="flex items-center justify-center gap-2 border-2 border-dashed border-gray-200 hover:border-primary-300 rounded-lg px-4 py-3 cursor-pointer transition-colors group">
-												<span className="text-xl text-gray-300 group-hover:text-primary-400 transition-colors">📝“„</span>
+												<span className="text-xl text-gray-300 group-hover:text-primary-400 transition-colors">🔄</span>
 												<span className="text-sm text-text-secondary group-hover:text-primary-600">Click to upload reports, lab results, or prescriptions</span>
 												<input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
 													onChange={e => {
@@ -506,7 +581,7 @@ export default function PatientDashboard() {
 										)}
 									</div>
 
-									{/* â”€â”€ Fee Summary â”€â”€ */}
+									{/* ── Fee Summary ── */}
 									<div className="bg-gradient-to-r from-primary-50 to-blue-50 border border-primary-100 rounded-xl p-4">
 										<div className="flex items-center justify-between mb-1">
 											<span className="text-sm text-text-secondary">Consultation Fee</span>
@@ -515,12 +590,12 @@ export default function PatientDashboard() {
 										<p className="text-xs text-text-secondary">Payment to be collected at the clinic or via online transfer</p>
 									</div>
 
-									{/* â”€â”€ Actions â”€â”€ */}
+									{/* ── Actions ── */}
 									<div className="flex gap-3 pt-1">
 										<button onClick={() => setBookingDoctor(null)} className="btn-secondary flex-1">Cancel</button>
-										<button onClick={handleFakePayment} disabled={bookingLoading || !bookingForm.visitType}
+										<button onClick={handleFakePayment} disabled={paymentLoading || !bookingForm.visitType}
 											className="btn-primary flex-1 flex items-center justify-center gap-2">
-											{bookingLoading ? (
+											{paymentLoading ? (
 												<><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Booking...</>
 											) : (
 												'✅ Confirm Booking'
@@ -534,7 +609,7 @@ export default function PatientDashboard() {
 				</div>
 			)}
 
-			{/* â”€â”€ APPOINTMENTS TAB (Refactored with Sub-views) â”€â”€ */}
+			{/* ── APPOINTMENTS TAB (Refactored with Sub-views) ── */}
 			{activeTab === 'appointments' && (
 				<>
 					{/* Sub-view: Consultation Preparation */}
@@ -569,7 +644,17 @@ export default function PatientDashboard() {
 								appointments={appointments}
 								onConsult={openConsultationPrep}
 								onReschedule={(apt) => showToast(`Reschedule for ${typeof apt.doctor === 'object' ? apt.doctor.name : apt.doctor} coming soon`, 'info')}
-								onCancel={(apt) => showToast(`Cancel appointment coming soon`, 'info')}
+								onCancel={async (apt) => {
+							const doctorName = typeof apt.doctor === 'object' ? apt.doctor.name : apt.doctor;
+							if (!window.confirm(`Cancel appointment with ${doctorName} on ${apt.date} at ${apt.startTime}?\n\nNote: Cannot cancel within 3 hours of the appointment.`)) return;
+							try {
+								await apiService.cancelAppointment(apt.id, { reason: 'Cancelled by patient' });
+								showToast('Appointment cancelled successfully.', 'success');
+								loadAppointments();
+							} catch (err) {
+								showToast(err.message || 'Failed to cancel appointment', 'error');
+							}
+						}}
 							/>
 
 							{/* Recent Consultations */}
@@ -582,12 +667,12 @@ export default function PatientDashboard() {
 				</>
 			)}
 
-			{/* â”€â”€ RECORDS TAB â”€â”€ */}
+			{/* ── RECORDS TAB ── */}
 			{activeTab === 'records' && (
 				<div className="space-y-6 animate-fade-in">
 					<div className="section-header">
 						<h1 className="text-2xl font-bold">Medical Records</h1>
-						<button className="btn-primary btn-sm" onClick={() => setUploadModal(true)}>📝“¤ Upload Record</button>
+						<button className="btn-primary btn-sm" onClick={() => setUploadModal(true)}>📤 Upload Record</button>
 					</div>
 
 					{/* Records Table */}
@@ -598,7 +683,7 @@ export default function PatientDashboard() {
 							</div>
 						) : medicalRecords.length === 0 ? (
 							<div className="text-center py-12 text-text-secondary text-sm">
-								<span className="text-4xl block mb-3">📝“‹</span>
+								<span className="text-4xl block mb-3">📋</span>
 								No records uploaded yet.
 								<button onClick={() => setUploadModal(true)} className="block mx-auto mt-3 btn-primary btn-sm">Upload your first record</button>
 							</div>
@@ -620,7 +705,10 @@ export default function PatientDashboard() {
 												) : <span className="italic text-[10px]">Generating...</span>}
 											</td>
 											<td className="space-x-2">
-												<a href={rec.fileUrl} target="_blank" rel="noreferrer" className="btn-ghost btn-sm text-xs">View</a>
+												<button onClick={() => setViewRecord(rec)} className="btn-ghost btn-sm text-xs">View</button>
+												{rec.aiSummary && (
+													<button onClick={() => downloadAiReport(rec)} className="btn-ghost btn-sm text-xs text-sky-600">📥 PDF</button>
+												)}
 												<button onClick={() => handleDeleteRecord(rec.id)} className="btn-ghost btn-sm text-xs text-danger-500">Delete</button>
 											</td>
 										</tr>
@@ -630,12 +718,40 @@ export default function PatientDashboard() {
 						)}
 					</div>
 
+					{/* View Record Modal */}
+					{viewRecord && (
+						<div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setViewRecord(null)}>
+							<div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+								<div className="p-4 border-b flex justify-between items-center bg-gray-50">
+									<h3 className="font-bold text-lg">{viewRecord.recordName}</h3>
+									<button onClick={() => setViewRecord(null)} className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-text-secondary">✕</button>
+								</div>
+								<div className="flex-1 overflow-y-auto p-6 grid md:grid-cols-2 gap-6">
+									<div className="border rounded-xl overflow-hidden bg-gray-100 min-h-[400px]">
+										<iframe src={viewRecord.fileUrl} className="w-full h-full min-h-[400px]" title="document" />
+									</div>
+									<div className="space-y-4">
+										<div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+											<h4 className="font-bold text-blue-800 mb-2">🧠 Full AI Clinical Summary</h4>
+											<p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+												{viewRecord.aiSummary || 'No AI summary available for this record.'}
+											</p>
+										</div>
+										<div className="text-[10px] text-gray-400 italic">
+											Generated by ClinIQ BART-Large Engine · {new Date(viewRecord.uploadedAt).toLocaleDateString()}
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+					)}
+
 					{/* Upload Modal */}
 					{uploadModal && (
 						<div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setUploadModal(false)}>
 							<div className="bg-white rounded-2xl shadow-clinical-lg w-full max-w-md p-6 animate-slide-up" onClick={e => e.stopPropagation()}>
 								<div className="flex items-center justify-between mb-5">
-									<h2 className="text-lg font-bold text-text-primary">📝“¤ Upload Medical Record</h2>
+									<h2 className="text-lg font-bold text-text-primary">📤 Upload Medical Record</h2>
 									<button onClick={() => setUploadModal(false)} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-text-secondary">✕</button>
 								</div>
 
@@ -671,9 +787,9 @@ export default function PatientDashboard() {
 											</div>
 										) : (
 											<label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-200 hover:border-primary-300 rounded-xl p-6 cursor-pointer transition-colors group">
-												<span className="text-3xl text-gray-300 group-hover:text-primary-400 transition-colors">📝“„</span>
+												<span className="text-3xl text-gray-300 group-hover:text-primary-400 transition-colors">🔄</span>
 												<span className="text-sm text-text-secondary group-hover:text-primary-600">Click to browse</span>
-												<span className="text-xs text-text-secondary">PDF, JPG, PNG –” max 5MB</span>
+												<span className="text-xs text-text-secondary">PDF, JPG, PNG - max 5MB</span>
 												<input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
 													onChange={e => { if (e.target.files[0]) setUploadForm(f => ({ ...f, file: e.target.files[0] })); }} />
 											</label>
@@ -698,7 +814,7 @@ export default function PatientDashboard() {
 				</div>
 			)}
 
-			{/* â”€â”€ BILLING TAB â”€â”€ */}
+			{/* ── BILLING TAB ── */}
 			{activeTab === 'billing' && (
 				<div className="space-y-6 animate-fade-in">
 					<h1 className="text-2xl font-bold">Billing & Payments</h1>
@@ -737,14 +853,14 @@ export default function PatientDashboard() {
 				</div>
 			)}
 
-			{/* â”€â”€ PHARMACY TAB â”€â”€ */}
+			{/* ── PHARMACY TAB ── */}
 			{activeTab === 'pharmacy' && (
 				<div className="space-y-6 animate-fade-in">
 					<PharmacyStore />
 				</div>
 			)}
 
-			{/* â”€â”€ AI HEALTH TAB â”€â”€ */}
+			{/* ── AI HEALTH TAB ── */}
 			{activeTab === 'ai-health' && (
 				<div className="space-y-6 animate-fade-in">
 					<div className="flex items-center gap-3">

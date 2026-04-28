@@ -68,8 +68,12 @@ function RescheduleCancelModal({ appointment, onClose, onDone }) {
 							<div className="grid grid-cols-4 gap-1.5 mt-1">
 								{[
 									{s:'09:00',l:'9:00 AM'},{s:'09:30',l:'9:30 AM'},{s:'10:00',l:'10:00 AM'},{s:'10:30',l:'10:30 AM'},
-									{s:'11:00',l:'11:00 AM'},{s:'11:30',l:'11:30 AM'},{s:'14:00',l:'2:00 PM'},{s:'14:30',l:'2:30 PM'},
-									{s:'15:00',l:'3:00 PM'},{s:'15:30',l:'3:30 PM'},{s:'16:00',l:'4:00 PM'},{s:'16:30',l:'4:30 PM'}
+									{s:'11:00',l:'11:00 AM'},{s:'11:30',l:'11:30 AM'},{s:'12:00',l:'12:00 PM'},{s:'12:30',l:'12:30 PM'},
+									{s:'13:00',l:'1:00 PM'},{s:'13:30',l:'1:30 PM'},{s:'14:00',l:'2:00 PM'},{s:'14:30',l:'2:30 PM'},
+									{s:'15:00',l:'3:00 PM'},{s:'15:30',l:'3:30 PM'},{s:'16:00',l:'4:00 PM'},{s:'16:30',l:'4:30 PM'},
+									{s:'17:00',l:'5:00 PM'},{s:'17:30',l:'5:30 PM'},{s:'18:00',l:'6:00 PM'},{s:'18:30',l:'6:30 PM'},
+									{s:'19:00',l:'7:00 PM'},{s:'19:30',l:'7:30 PM'},{s:'20:00',l:'8:00 PM'},{s:'20:30',l:'8:30 PM'},
+									{s:'21:00',l:'9:00 PM'},{s:'21:30',l:'9:30 PM'},{s:'22:00',l:'10:00 PM'},{s:'22:30',l:'10:30 PM'}
 								].map(({s,l}) => (
 									<button key={s} type="button"
 										className={`py-1.5 px-1 rounded-lg text-xs font-medium border transition-all ${newStart===s?'bg-primary-600 text-white border-primary-600':'bg-white text-text-secondary border-gray-200 hover:border-primary-300 hover:bg-primary-50'}`}
@@ -484,6 +488,11 @@ export default function DoctorDashboard() {
 										<span className={`badge ${apt.status === 'confirmed' ? 'badge-success' : apt.status === 'pending' ? 'badge-amber' : 'badge-gray'}`}>
 											{apt.status?.toUpperCase()}
 										</span>
+										{apt.status === 'confirmed' && (
+											<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700 animate-pulse-soft">
+												🟢 Patient Ready
+											</span>
+										)}
 										<button className="btn-primary btn-sm text-xs" onClick={() => openConsultView(apt)}>
 											🩺 Consult
 										</button>
@@ -531,10 +540,17 @@ export default function DoctorDashboard() {
 											<td className="text-sm whitespace-nowrap">{apt.date}</td>
 											<td className="text-sm whitespace-nowrap">{apt.startTime}</td>
 											<td>
+												<div className="flex flex-col gap-1">
 												<span className={`badge ${
 													apt.status === 'confirmed'   ? 'badge-success' :
 													apt.status === 'in_progress' ? 'badge-ai' : 'badge-amber'
 												}`}>{apt.status?.toUpperCase()}</span>
+												{apt.status === 'confirmed' && (
+													<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-700 animate-pulse-soft">
+														🟢 Patient Ready
+													</span>
+												)}
+											</div>
 											</td>
 											<td>
 												<div className="flex items-center gap-2">

@@ -72,7 +72,7 @@ function computeState(appointmentDate, startTime, status) {
 
 	const uploadsLocked = diffMinutes <= 15;
 	const summaryLocked = diffMinutes <= 10;
-	const meetingEnabled = diffMinutes <= 15 && diffMinutes > -120; // Enable 15 min before, disable 2 hrs after
+	const meetingEnabled = diffMinutes <= 15; // Enable 15 min before start, always accessible after
 	const isStarted = diffMinutes <= 0;
 	const isCompleted = status === 'completed';
 

@@ -1,7 +1,24 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import apiService from "../services/api.js";
 import AppointmentSuccess from "./AppointmentSuccess.jsx";
 import "./AppointmentBooking.css";
+
+const TIME_SLOT_MAP = {
+	"9:00 AM": "09:00", "9:30 AM": "09:30",
+	"10:00 AM": "10:00", "10:30 AM": "10:30",
+	"11:00 AM": "11:00", "11:30 AM": "11:30",
+	"12:00 PM": "12:00", "12:30 PM": "12:30",
+	"1:00 PM": "13:00", "1:30 PM": "13:30",
+	"2:00 PM": "14:00", "2:30 PM": "14:30",
+	"3:00 PM": "15:00", "3:30 PM": "15:30",
+	"4:00 PM": "16:00", "4:30 PM": "16:30",
+	"5:00 PM": "17:00", "5:30 PM": "17:30",
+	"6:00 PM": "18:00", "6:30 PM": "18:30",
+	"7:00 PM": "19:00", "7:30 PM": "19:30",
+	"8:00 PM": "20:00", "8:30 PM": "20:30",
+	"9:00 PM": "21:00", "9:30 PM": "21:30",
+	"10:00 PM": "22:00", "10:30 PM": "22:30",
+};
 
 const AppointmentBooking = ({ doctor, onClose, onSuccess }) => {
 	const [selectedDate, setSelectedDate] = useState("");
@@ -10,47 +27,43 @@ const AppointmentBooking = ({ doctor, onClose, onSuccess }) => {
 	const [notes, setNotes] = useState("");
 	const [showSuccess, setShowSuccess] = useState(false);
 	const [appointmentDetails, setAppointmentDetails] = useState(null);
+	const [bookedSlots, setBookedSlots] = useState([]);
 
-	const timeSlots = [
-		"9:00 AM", "9:30 AM", "10:00 AM", "10:30 AM", "11:00 AM", "11:30 AM",
-		"2:00 PM", "2:30 PM", "3:00 PM", "3:30 PM", "4:00 PM", "4:30 PM"
-	];
+	const timeSlots = Object.keys(TIME_SLOT_MAP);
+
+	useEffect(() => {
+		if (!selectedDate || !doctor?.id) return;
+		apiService.getDoctorAvailability(doctor.id, selectedDate)
+			.then(res => setBookedSlots(res?.data?.bookedSlots || []))
+			.catch(() => setBookedSlots([]));
+		setSelectedTime("");
+	}, [selectedDate, doctor?.id]);
+
+	const isSlotBooked = (displayTime) => {
+		const slotStart = TIME_SLOT_MAP[displayTime];
+		return bookedSlots.some(b => b.startTime === slotStart);
+	};
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
 		try {
+			const startTime = TIME_SLOT_MAP[selectedTime];
 			const appointmentData = {
 				doctorId: doctor.id,
-				date: selectedDate,
-				time: selectedTime,
+				appointmentDate: selectedDate,
+				startTime,
 				reason,
 				notes
 			};
-			
-			// Check if in mock mode
 			const token = localStorage.getItem('token');
-			if (token === 'mock-token') {
-				// Simulate API call delay
-				await new Promise(resolve => setTimeout(resolve, 500));
-				// Mock success
-				if (onSuccess) {
-					onSuccess();
-				} else {
-					setAppointmentDetails({ ...appointmentData, doctorName: doctor.name });
-					setShowSuccess(true);
-				}
-			} else {
+			if (token !== 'mock-token') {
 				await apiService.bookAppointment(appointmentData);
-				if (onSuccess) {
-					onSuccess();
-				} else {
-					setAppointmentDetails({ ...appointmentData, doctorName: doctor.name });
-					setShowSuccess(true);
-				}
 			}
+			setAppointmentDetails({ date: selectedDate, time: selectedTime, doctorName: doctor.name, specialty: doctor.specialty, fee: doctor.consultationFee, reason });
+			setShowSuccess(true);
+			if (onSuccess) onSuccess();
 		} catch (error) {
 			console.error('Booking error:', error);
-			// Show error in a simple way without external toast
 			alert('Failed to book appointment: ' + error.message);
 		}
 	};
@@ -107,16 +120,21 @@ const AppointmentBooking = ({ doctor, onClose, onSuccess }) => {
 					<div className="form-group">
 						<label className="form-label">Select Time</label>
 						<div className="time-slots-grid">
-							{timeSlots.map(time => (
-								<button
-									key={time}
-									type="button"
-									onClick={() => setSelectedTime(time)}
-									className={`time-slot ${selectedTime === time ? 'selected' : ''}`}
-								>
-									{time}
-								</button>
-							))}
+							{timeSlots.map(time => {
+								const booked = isSlotBooked(time);
+								return (
+									<button
+										key={time}
+										type="button"
+										onClick={() => !booked && setSelectedTime(time)}
+										disabled={booked}
+										className={`time-slot ${selectedTime === time ? 'selected' : ''} ${booked ? 'booked' : ''}`}
+										title={booked ? 'Already booked' : ''}
+									>
+										{time}
+									</button>
+								);
+							})}
 						</div>
 					</div>
 
@@ -152,8 +170,8 @@ const AppointmentBooking = ({ doctor, onClose, onSuccess }) => {
 						<button type="button" onClick={onClose} className="cancel-btn">
 							Cancel
 						</button>
-						<button 
-							type="submit" 
+						<button
+							type="submit"
 							disabled={!selectedDate || !selectedTime || !reason}
 							className="book-btn"
 						>

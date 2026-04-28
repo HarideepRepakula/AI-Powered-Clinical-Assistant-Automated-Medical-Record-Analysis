@@ -9,6 +9,7 @@
 
 import fs from "fs/promises";
 import path from "path";
+import { spawn } from "child_process";
 import Tesseract from "tesseract.js";
 import { MedicalRecordModel } from "../models/MedicalRecord.js";
 import { LabResultModel }     from "../models/LabResult.js";
@@ -16,15 +17,33 @@ import { parseLabReportOcr, generateMedicalRecordSummary } from "../services/oll
 
 const UPLOADS_BASE_URL = process.env.UPLOADS_BASE_URL || "http://localhost:4000/uploads";
 
+// Use pdfplumber (via summarize.py) for digital PDFs, Tesseract for images
+async function extractText(filePath, mimeType) {
+	if (mimeType === 'application/pdf') {
+		return new Promise((resolve) => {
+			const scriptPath = path.join(process.cwd(), 'summarize.py');
+			const py = spawn('python', [scriptPath, filePath]);
+			let out = '', err = '';
+			py.stdout.on('data', d => { out += d.toString(); });
+			py.stderr.on('data', d => { err += d.toString(); });
+			py.on('close', () => resolve(out.trim()));
+			py.on('error', () => resolve(''));
+		});
+	}
+	const { data: { text } } = await Tesseract.recognize(filePath, 'eng');
+	return text?.trim() || '';
+}
+
 // ─── Background: OCR + AI Summary ────────────────────────────────────────────
 
-async function processRecordInBackground(filePath, patientId, recordId, fileType, fileName) {
+async function processRecordInBackground(filePath, patientId, recordId, fileType, fileName, mimeType) {
 	try {
-		// OCR
-		const { data: { text } } = await Tesseract.recognize(filePath, 'eng');
-		const ocrText = text?.trim() || '';
+		const ocrText = await extractText(filePath, mimeType);
 
-		if (ocrText.length < 20) return;
+		if (ocrText.length < 20) {
+			console.warn('[RECORDS] Extracted text too short, skipping summary for', fileName);
+			return;
+		}
 
 		// Parse lab data if it's a lab report
 		if (fileType === "Lab Report") {
@@ -45,25 +64,39 @@ async function processRecordInBackground(filePath, patientId, recordId, fileType
 			}
 		}
 
-		// Generate AI summary (natural remedies, no drugs)
+		// Generate AI summary using BART (no Ollama dependency)
 		try {
-			const summary = await generateMedicalRecordSummary(ocrText, fileName);
-			const summaryText = [
-				summary.summary,
-				summary.keyFindings?.length ? `Key findings: ${summary.keyFindings.join('; ')}` : '',
-				summary.naturalRemedies?.length ? `Natural recommendations: ${summary.naturalRemedies.join('; ')}` : '',
-				summary.severityFlag && summary.severityFlag !== 'none' ? `⚠️ ${summary.flagReason}` : '',
-			].filter(Boolean).join('\n\n');
+			const scriptPath = path.join(process.cwd(), 'summarize.py');
+			const bartResult = await new Promise((resolve, reject) => {
+				const py = spawn('python', [scriptPath]);
+				let out = '', err = '';
+				py.stdin.write(ocrText);
+				py.stdin.end();
+				py.stdout.on('data', d => { out += d.toString(); });
+				py.stderr.on('data', d => { err += d.toString(); });
+				py.on('close', code => {
+					if (code === 0 && out.trim()) {
+						try { resolve(JSON.parse(out.trim())); }
+						catch { resolve({ summary: out.trim(), extracted_meds: [] }); }
+					} else {
+						reject(new Error(err || 'BART failed'));
+					}
+				});
+				py.on('error', reject);
+			});
 
 			await MedicalRecordModel.findByIdAndUpdate(recordId, {
-				aiSummary: summaryText,
+				aiSummary:            bartResult.summary,
 				aiSummaryGeneratedAt: new Date(),
-				// Store structured for richer display
-				aiSummaryData: summary,
 			});
-			console.log(`[RECORDS] AI summary generated for record ${recordId}`);
+			console.log(`[RECORDS] BART summary saved for record ${recordId}`);
 		} catch (e) {
-			console.warn('[RECORDS] AI summary failed:', e.message);
+			console.warn('[RECORDS] BART summary failed:', e.message);
+			// Save a fallback so UI doesn't stay on "Generating..."
+			await MedicalRecordModel.findByIdAndUpdate(recordId, {
+				aiSummary:            `File: ${fileName}. Text extracted (${ocrText.length} chars). AI summary unavailable.`,
+				aiSummaryGeneratedAt: new Date(),
+			});
 		}
 	} catch (err) {
 		console.error('[RECORDS] Background processing error:', err.message);
@@ -101,7 +134,7 @@ export async function uploadMedicalRecord(req, res) {
 		});
 
 		// Fire-and-forget: OCR + AI summary in background
-		processRecordInBackground(req.file.path, req.user.userId, record._id, fileType, req.file.originalname);
+		processRecordInBackground(req.file.path, req.user.userId, record._id, fileType, req.file.originalname, req.file.mimetype);
 
 		res.status(201).json({
 			success: true,

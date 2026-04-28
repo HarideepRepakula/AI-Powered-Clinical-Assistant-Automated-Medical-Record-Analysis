@@ -123,28 +123,30 @@ const PrescriptionModal = ({ patient, onClose, onSubmit }) => {
 	);
 };
 
-const AppointmentSuccess = ({ appointmentDetails, onViewAppointments, onClose, onUploadRecords }) => {
+const AppointmentSuccess = ({ appointmentDetails, onViewAppointments, onClose }) => {
+	const { doctorName, specialty, time, fee, uploadedFile } = appointmentDetails || {};
 	return (
 		<div className="success-modal-overlay">
 			<div className="success-modal">
-				<div className="booking-success-content">
-					<div className="booking-success-icon">📅</div>
-					<h1 className="booking-success-title">🎉 Appointment Successfully Booked!</h1>
-					<p className="booking-primary-message">Your appointment has been confirmed</p>
-					<p className="booking-secondary-message">
-						You will receive a confirmation email shortly with all the details.
-					</p>
-					<p className="booking-action-prompt">
-						Would you like to upload any relevant medical records for the doctor now?
-					</p>
-					<div className="booking-success-actions">
-						<button onClick={onUploadRecords || (() => {})} className="booking-primary-btn">
-							Upload Medical Records
-						</button>
-						<button onClick={onViewAppointments} className="booking-secondary-btn">
-							Skip / View Appointments
-						</button>
-					</div>
+				<div className="success-check-circle">
+					<svg viewBox="0 0 52 52" className="success-checkmark">
+						<circle cx="26" cy="26" r="25" fill="none" />
+						<path fill="none" d="M14 27l8 8 16-16" />
+					</svg>
+				</div>
+				<h2 className="success-title">Appointment Confirmed! 🎉</h2>
+				<p className="success-subtitle">
+					Your appointment with <strong>{doctorName}</strong>{specialty ? ` (${specialty})` : ""} has been successfully scheduled.
+				</p>
+				<div className="success-details">
+					{time && <div className="success-detail-row"><span className="detail-label">🕐 Time</span><span>{time}</span></div>}
+					<div className="success-detail-row"><span className="detail-label">💳 Consultation Fee</span><span>₹{fee || 100} <em>(To be paid at the clinic)</em></span></div>
+					{uploadedFile && <div className="success-detail-row"><span className="detail-label">📎 Record Uploaded</span><span>{uploadedFile}</span></div>}
+				</div>
+				<p className="success-notice">A confirmation message has been sent to your registered mobile number/email.</p>
+				<div className="success-actions">
+					<button onClick={onViewAppointments} className="success-primary-btn">View My Bookings</button>
+					<button onClick={onClose} className="success-close-link">Done</button>
 				</div>
 			</div>
 		</div>

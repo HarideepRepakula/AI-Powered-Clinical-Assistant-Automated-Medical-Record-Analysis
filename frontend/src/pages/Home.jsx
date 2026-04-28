@@ -12,8 +12,8 @@ export default function Home() {
 					<span className="text-xl font-bold text-text-primary">ClinIQ <span className="text-ai-500 text-sm font-semibold">AI</span></span>
 				</div>
 				<div className="flex items-center gap-3">
-					<Link to="/login" className="btn-ghost btn-sm">Login</Link>
-					<Link to="/signup" className="btn-primary btn-sm">Get Started</Link>
+					<Link to="/doctor/login" className="btn-ghost btn-sm">Doctor Login</Link>
+					<Link to="/patient/login" className="btn-primary btn-sm">Patient Login</Link>
 				</div>
 			</nav>
 
@@ -25,18 +25,42 @@ export default function Home() {
 						Your Health, <br className="hidden sm:block" />
 						<span className="text-primary-600">Intelligently</span> Managed
 					</h1>
-					<p className="text-lg lg:text-xl text-text-secondary max-w-2xl mx-auto mb-10 leading-relaxed">
+					<p className="text-lg lg:text-xl text-text-secondary max-w-2xl mx-auto mb-12 leading-relaxed">
 						Connect with healthcare professionals, get AI-powered health insights,
 						and manage your clinical journey — all in one platform.
 					</p>
-					<div className="flex items-center justify-center gap-4 flex-wrap">
-						<Link to="/signup" className="btn-primary btn-lg">
-							Start Free →
+
+					{/* Portal Cards */}
+					<div className="grid sm:grid-cols-2 gap-6 max-w-2xl mx-auto mb-8">
+						{/* Doctor Portal */}
+						<Link to="/doctor/login" className="group block p-8 bg-white border-2 border-primary-100 hover:border-primary-400 rounded-clinical-lg shadow-clinical hover:shadow-clinical-md transition-all text-left">
+							<div className="w-14 h-14 bg-primary-50 rounded-clinical flex items-center justify-center text-3xl mb-4 group-hover:bg-primary-100 transition-colors">
+								🩺
+							</div>
+							<h2 className="text-xl font-bold text-text-primary mb-1">Doctor Portal</h2>
+							<p className="text-sm text-text-secondary mb-4">Access patient records, AI briefings, video consultations, and clinical tools.</p>
+							<span className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary-600 group-hover:gap-2.5 transition-all">
+								Sign in as Doctor <span>→</span>
+							</span>
 						</Link>
-						<Link to="/login" className="btn-secondary btn-lg">
-							Sign In
+
+						{/* Patient Portal */}
+						<Link to="/patient/login" className="group block p-8 bg-white border-2 border-success-100 hover:border-success-400 rounded-clinical-lg shadow-clinical hover:shadow-clinical-md transition-all text-left">
+							<div className="w-14 h-14 bg-success-50 rounded-clinical flex items-center justify-center text-3xl mb-4 group-hover:bg-success-100 transition-colors">
+								🏥
+							</div>
+							<h2 className="text-xl font-bold text-text-primary mb-1">Patient Portal</h2>
+							<p className="text-sm text-text-secondary mb-4">Book appointments, view records, chat with AI, and manage your health journey.</p>
+							<span className="inline-flex items-center gap-1.5 text-sm font-semibold text-success-600 group-hover:gap-2.5 transition-all">
+								Sign in as Patient <span>→</span>
+							</span>
 						</Link>
 					</div>
+
+					<p className="text-sm text-text-secondary">
+						New patient?{' '}
+						<Link to="/signup" className="font-semibold text-primary-600 hover:text-primary-700">Create a free account →</Link>
+					</p>
 				</div>
 			</section>
 
@@ -44,36 +68,12 @@ export default function Home() {
 			<section className="px-6 lg:px-16 pb-20">
 				<div className="max-w-6xl mx-auto grid md:grid-cols-3 gap-6">
 					{[
-						{
-							icon: '🧠', title: 'AI Health Insights',
-							desc: 'Get personalized health analysis powered by Gemini AI, from lab reports to drug safety checks.',
-							badge: 'AI Assisted'
-						},
-						{
-							icon: '📋', title: 'Smart Records',
-							desc: 'Upload lab reports and get instant OCR parsing with structured data visualization and trend tracking.',
-							badge: null
-						},
-						{
-							icon: '💊', title: 'Pharmacy Automation',
-							desc: 'Auto-generated medicine carts from prescriptions, with real-time order tracking and inventory matching.',
-							badge: null
-						},
-						{
-							icon: '🎙️', title: 'AI Medical Scribe',
-							desc: 'Real-time voice transcription during consultations using Web Speech API — no cost, no setup.',
-							badge: 'AI Assisted'
-						},
-						{
-							icon: '🛡️', title: 'Drug Safety (CDSS)',
-							desc: 'Clinical decision support with OpenFDA integration and Gemini analysis for drug interactions.',
-							badge: 'AI Assisted'
-						},
-						{
-							icon: '📊', title: 'Health Timeline',
-							desc: 'Track lab values over time with interactive charts, color-coded flags, and trend analysis.',
-							badge: null
-						},
+						{ icon: '🧠', title: 'AI Health Insights', desc: 'Get personalized health analysis powered by BART AI, from lab reports to drug safety checks.', badge: 'AI Assisted' },
+						{ icon: '📋', title: 'Smart Records', desc: 'Upload lab reports and get instant OCR parsing with structured data visualization and trend tracking.', badge: null },
+						{ icon: '💊', title: 'Pharmacy Automation', desc: 'Auto-generated medicine carts from prescriptions, with real-time order tracking and inventory matching.', badge: null },
+						{ icon: '🎙️', title: 'AI Medical Scribe', desc: 'Real-time voice transcription during consultations using Web Speech API — no cost, no setup.', badge: 'AI Assisted' },
+						{ icon: '🛡️', title: 'Drug Safety (CDSS)', desc: 'Clinical decision support with OpenFDA integration and Ollama analysis for drug interactions.', badge: 'AI Assisted' },
+						{ icon: '📊', title: 'Health Timeline', desc: 'Track lab values over time with interactive charts, color-coded flags, and trend analysis.', badge: null },
 					].map((f, i) => (
 						<div key={i} className={`card hover:shadow-clinical-md transition-shadow duration-300 ${f.badge ? 'border-ai-100' : ''}`}>
 							<span className="text-3xl mb-4 block">{f.icon}</span>
@@ -97,7 +97,7 @@ export default function Home() {
 						<h2 className="text-2xl lg:text-3xl font-bold mb-4">Ready to experience intelligent healthcare?</h2>
 						<p className="text-primary-100 mb-8 max-w-lg mx-auto">Join ClinIQ AI and access the future of clinical intelligence — for free.</p>
 						<Link to="/signup" className="inline-flex items-center gap-2 bg-white text-primary-700 px-8 py-3 rounded-clinical font-semibold hover:bg-primary-50 transition-colors">
-							Create Account →
+							Create Patient Account →
 						</Link>
 					</div>
 				</div>
@@ -110,7 +110,11 @@ export default function Home() {
 						<span className="font-semibold text-text-primary">ClinIQ AI</span>
 						<span>• Clinical Intelligence Assistant</span>
 					</div>
-					<span>© 2026 ClinIQ AI. All rights reserved.</span>
+					<div className="flex items-center gap-4">
+						<Link to="/doctor/login" className="hover:text-text-primary transition-colors">Doctor Portal</Link>
+						<Link to="/patient/login" className="hover:text-text-primary transition-colors">Patient Portal</Link>
+						<span>© 2026 ClinIQ AI</span>
+					</div>
 				</div>
 			</footer>
 		</div>

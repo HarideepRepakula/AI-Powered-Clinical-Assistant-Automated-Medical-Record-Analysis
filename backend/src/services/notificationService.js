@@ -163,6 +163,22 @@ export async function notifyCancellation(patient, appointment, cancelledBy) {
 }
 
 /**
+ * Patient Ready for Meeting
+ * Triggered when patient clicks "Ready for Meeting" button.
+ * Sends: In-app → Doctor
+ */
+export async function notifyPatientReady(doctorId, patient, appointment) {
+	await persist(
+		doctorId,
+		"pre_consult_reminder",
+		"🟢 Patient is Ready for Meeting",
+		`${patient.name} is ready to join the video consultation for their ${appointment.startTime} appointment. Please start the meeting.`,
+		{ appointmentId: appointment._id, patientId: patient._id }
+	);
+	console.log(`[NOTIFICATION] Patient ready → doctor ${doctorId}`);
+}
+
+/**
  * Pre-Consultation Reminder (10-minute alert)
  * Triggered by a scheduler or polling mechanism.
  * Sends: In-app → Doctor

@@ -3,17 +3,44 @@
  * Pre-consultation summary, AI Scribe (transcript save), CDSS check.
  */
 
+import { spawn } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
 import mongoose from "mongoose";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { AppointmentModel }  from "../models/Appointment.js";
 import { PrescriptionModel } from "../models/Prescription.js";
 import { LabResultModel }    from "../models/LabResult.js";
 import { TranscriptModel }   from "../models/Transcript.js";
 import { UserModel }         from "../models/User.js";
 import {
-	generatePreConsultSummary,
 	runCdssCheck,
 	generateHealthInsights
 } from "../services/ollamaService.js";
+
+// ─── Shared BART Python Bridge ──────────────────────────────────────────────────────
+function runBartSummarizer(text) {
+	return new Promise((resolve, reject) => {
+		const scriptPath = path.join(process.cwd(), "summarize.py");
+		const py = spawn("python", [scriptPath]);
+		let output = "", error = "";
+		py.stdin.write(text);
+		py.stdin.end();
+		py.stdout.on("data", d => { output += d.toString(); });
+		py.stderr.on("data", d => { error += d.toString(); });
+		py.on("close", code => {
+			if (code === 0 && output.trim()) {
+				try { resolve(JSON.parse(output.trim())); }
+				catch { resolve({ summary: output.trim(), extracted_meds: [] }); }
+			} else {
+				console.error("[BART]", error);
+				reject(new Error("BART summarization failed"));
+			}
+		});
+		py.on("error", err => reject(new Error("Python not found: " + err.message)));
+	});
+}
 
 // ─── Pre-Consultation Summary ─────────────────────────────────────────────────
 
@@ -31,48 +58,77 @@ export async function getPreConsultSummary(req, res) {
 		if (!appointment) {
 			return res.status(404).json({ success: false, error: "Appointment not found." });
 		}
-
-		// Only allow the appointment's doctor
 		if (appointment.doctorId.toString() !== doctorId) {
 			return res.status(403).json({ success: false, error: "Unauthorized." });
 		}
 
+		// Return cached summary if already generated
+		if (appointment.aiPreparedSummary?.content) {
+			return res.json({
+				success: true,
+				data: {
+					summary:       appointment.aiPreparedSummary.content,
+					generatedAt:   appointment.aiPreparedSummary.generatedAt,
+					cached:        true
+				}
+			});
+		}
+
 		const patientId = appointment.patientId;
 
-		// Gather patient context
 		const [patient, prescriptions, labResults] = await Promise.all([
 			UserModel.findById(patientId).lean(),
-			PrescriptionModel.find({ patientId }).sort({ createdAt: -1 }).limit(5).lean(),
-			LabResultModel.find({ patientId }).sort({ recordDate: -1 }).limit(5).lean()
+			PrescriptionModel.find({ patientId }).sort({ createdAt: -1 }).limit(3).lean(),
+			LabResultModel.find({ patientId }).sort({ recordDate: -1 }).limit(3).lean()
 		]);
 
 		if (!patient) {
 			return res.status(404).json({ success: false, error: "Patient not found." });
 		}
 
-		const summary = await generatePreConsultSummary({
-			patientName:   patient.name,
-			prescriptions,
-			labResults
-		});
+		// Build context string for BART
+		const labText = labResults.map(l => l.rawText || l.rawOcrText || "").filter(Boolean).join(" ");
+		const medText = prescriptions.flatMap(p => p.medicines?.map(m => m.name) || []).join(", ");
+		const fullContext = [
+			`Patient: ${patient.name}.`,
+			`Reason: ${appointment.reason}.`,
+			medText  ? `Medications: ${medText}.` : "",
+			labText  ? `Lab records: ${labText}.`  : ""
+		].filter(Boolean).join(" ");
+
+		console.log("--- BART AI START (pre-consult) ---");
+		const bartResult = await runBartSummarizer(fullContext || "No previous records available.");
+		console.log("--- BART AI COMPLETE ---");
+
+		// Save to DB so chatbot and doctor view can both read it
+		const updatePayload = {
+			$set: {
+				"aiPreparedSummary.content":     bartResult.summary,
+				"aiPreparedSummary.generatedAt": new Date(),
+				"aiPreparedSummary.isLocked":    false
+			}
+		};
+		if (bartResult.extracted_meds?.length > 0) {
+			updatePayload.$set["consultationRecords.medicines"] = bartResult.extracted_meds.map(name => ({
+				name, dosage: "TBD", frequency: "As directed"
+			}));
+		}
+		await AppointmentModel.findByIdAndUpdate(appointmentId, updatePayload);
 
 		res.json({
 			success: true,
 			data: {
 				patientName:   patient.name,
 				appointmentId,
-				generatedAt:   new Date().toISOString(),
-				...summary
+				summary:       bartResult.summary,
+				extractedMeds: bartResult.extracted_meds || [],
+				generatedAt:   new Date().toISOString()
 			}
 		});
 
 	} catch (error) {
 		console.error("Pre-consult summary error:", error.message);
-
-		if (error.message?.includes("OLLAMA") || error.message?.includes("connect")) {
-			return res.status(503).json({ success: false, error: "AI service unavailable. Ensure Ollama is running." });
-		}
-		res.status(500).json({ success: false, error: "Failed to generate pre-consultation summary." });
+		res.status(500).json({ success: false, error: "BART Engine failed. Ensure Python and summarize.py are available." });
 	}
 }
 
@@ -269,5 +325,26 @@ export async function getHealthInsights(req, res) {
 				disclaimer: "⚕️ General health tips. Add your lab records for personalized insights."
 			}
 		});
+	}
+}
+
+// ─── BART Medical Summarizer ──────────────────────────────────────────────────
+
+/**
+ * POST /api/ai/bart-summary
+ * Runs facebook/bart-large-cnn via Python child process.
+ * Body: { text }
+ */
+export async function getBartSummary(req, res) {
+	const { text } = req.body;
+	if (!text?.trim()) {
+		return res.status(400).json({ success: false, error: "text is required." });
+	}
+	try {
+		const result = await runBartSummarizer(text);
+		res.json({ success: true, summary: result.summary, extractedMeds: result.extracted_meds || [] });
+	} catch (err) {
+		console.error("[BART] getBartSummary error:", err.message);
+		res.status(500).json({ success: false, error: "BART summarizer failed. Ensure Python and transformers are installed." });
 	}
 }

@@ -7,6 +7,84 @@ import { PrescriptionModel }  from "../models/Prescription.js";
 import { PharmacyOrderModel } from "../models/PharmacyOrder.js";
 import { InventoryModel }     from "../models/Inventory.js";
 import { UserModel }          from "../models/User.js";
+import { spawn }              from "child_process";
+import path                   from "path";
+import { mapMedsToInventory } from "../services/ollamaService.js";
+
+// ─── Upload External Prescription (Patient) ──────────────────────────────────────────────────────
+
+/**
+ * POST /api/pharmacy/upload-prescription
+ * Patient uploads an external prescription image/PDF.
+ * BART extracts medicine names. Patient must confirm before cart is created.
+ */
+export async function uploadExternalPrescription(req, res) {
+	try {
+		if (!req.file) {
+			return res.status(400).json({ success: false, error: "No file uploaded." });
+		}
+
+		const scriptPath = path.join(process.cwd(), "summarize.py");
+		const py = spawn("python", [scriptPath, req.file.path]);
+		let output = "", error = "";
+
+		py.stdout.on("data", d => { output += d.toString(); });
+		py.stderr.on("data", d => { error += d.toString(); });
+
+		py.on("close", async (code) => {
+			// Cleanup temp file
+			try { await import("fs/promises").then(fs => fs.unlink(req.file.path)); } catch {}
+
+			if (code !== 0 || !output.trim()) {
+				console.error("[PHARMACY] BART prescription parse failed:", error);
+				return res.status(500).json({ success: false, error: "AI failed to read prescription." });
+			}
+
+			let aiData;
+			try { aiData = JSON.parse(output.trim()); }
+			catch { aiData = { summary: output.trim(), extracted_meds: [] }; }
+
+			// Fuzzy-map extracted names to inventory using Ollama (with regex fallback)
+			const extractedNames = aiData.extracted_meds || [];
+			let matchedProducts = [];
+			if (extractedNames.length > 0) {
+				const allProducts = await InventoryModel.find({ isActive: true })
+					.select('name genericName category price stock image').lean();
+				matchedProducts = await mapMedsToInventory(extractedNames, allProducts);
+			}
+
+			// For names not found in inventory, include them as unmatched so UI can still show them
+			const matchedNames = matchedProducts.map(p => p.name.toLowerCase());
+			const unmatched = extractedNames.filter(n => !matchedNames.some(m => m.includes(n.toLowerCase())));
+
+			res.json({
+				success: true,
+				message: "AI has extracted medicines from your prescription. Please verify before adding to cart.",
+				data: {
+					matchedProducts: matchedProducts.map(p => ({
+						_id:      p._id,
+						name:     p.name,
+						price:    p.price,
+						stock:    p.stock,
+						category: p.category,
+						image:    p.image || null
+					})),
+					unmatched,
+					extractedMeds: extractedNames,
+					summary: aiData.summary || ""
+				}
+			});
+		});
+
+		py.on("error", (err) => {
+			res.status(500).json({ success: false, error: "Python not found: " + err.message });
+		});
+
+	} catch (error) {
+		console.error("Upload external prescription error:", error.message);
+		res.status(500).json({ success: false, error: "Server error." });
+	}
+}
 
 // ─── Get Inventory Products (for store browsing) ────────────────────────────
 

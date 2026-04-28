@@ -2,7 +2,8 @@ import express from "express";
 import {
 	saveTranscript,
 	cdssCheck,
-	getHealthInsights
+	getHealthInsights,
+	getBartSummary
 } from "../controllers/ai.controller.js";
 import { requireRole } from "../middleware/rbac.js";
 
@@ -16,5 +17,8 @@ router.post("/cdss-check", requireRole(["DOCTOR"]), cdssCheck);
 
 // GET /api/ai/health-insights — Patient only
 router.get("/health-insights", requireRole(["PATIENT"]), getHealthInsights);
+
+// POST /api/ai/bart-summary — Doctor/Patient
+router.post("/bart-summary", getBartSummary);
 
 export default router;

@@ -18,7 +18,8 @@ import {
 	completeConsultation,
 	getConsultationRecords,
 	getPatientQueries,
-	respondToPatientQuery
+	respondToPatientQuery,
+	patientReadyForMeeting
 } from '../controllers/appointment.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { validateAppointmentBooking, validateAppointmentUpdate } from '../middleware/validation.js';
@@ -61,6 +62,9 @@ router.post('/:id/reschedule', rescheduleAppointment);
 router.get('/:id/lock-state',         getAppointmentLockState);
 router.get('/:id/consultation-state', getConsultationState);
 router.get('/:id/consultation-data',  getConsultationData);  // unified run-once endpoint
+
+// Patient ready for meeting
+router.post('/:id/patient-ready', patientReadyForMeeting);
 
 // Consultation lifecycle
 router.get('/:id/ai-summary',                    getAiSummary);

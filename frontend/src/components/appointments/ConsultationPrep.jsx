@@ -132,9 +132,20 @@ export default function ConsultationPrep({ appointment, onBack }) {
 	const [summaryError, setSummaryError]   = useState('');
 	const [meetingActive, setMeetingActive] = useState(false);
 	const [isRecording, setIsRecording]     = useState(false);
-	const fileInputRef    = useRef(null);
+	const [scribeText, setScribeText]       = useState('');
+	const [scribeDuration, setScribeDuration] = useState(0);
+	const [scribeListening, setScribeListening] = useState(false);
+	const fileInputRef     = useRef(null);
 	const mediaRecorderRef = useRef(null);
-	const audioChunksRef  = useRef([]);
+	const audioChunksRef   = useRef([]);
+	const scribeRef        = useRef(null);
+	const scribeTimerRef   = useRef(null);
+	const scribeSegments   = useRef([]);
+	const scribeTextRef    = useRef('');  // always up-to-date copy for endMeeting closure
+	const scribeDurRef     = useRef(0);
+	const SpeechRecognition = typeof window !== 'undefined'
+		? (window.SpeechRecognition || window.webkitSpeechRecognition)
+		: null;
 
 	const timer = useConsultationTimer(
 		appointment?.date,
@@ -258,7 +269,12 @@ export default function ConsultationPrep({ appointment, onBack }) {
 	}
 
 	// ── Meeting / Recording ──────────────────────────────────────────────────
-	function joinMeeting() { if (timer.meetingEnabled) setMeetingActive(true); }
+	function joinMeeting() {
+		if (timer.meetingEnabled) {
+			setMeetingActive(true);
+			startRecording();
+		}
+	}
 
 	async function startRecording() {
 		try {
@@ -269,6 +285,30 @@ export default function ConsultationPrep({ appointment, onBack }) {
 			mediaRecorderRef.current = mediaRecorder;
 			mediaRecorder.start(1000);
 			setIsRecording(true);
+			if (SpeechRecognition) {
+				const rec = new SpeechRecognition();
+				rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+				rec.onresult = (e) => {
+					let final = '';
+					for (let x = e.resultIndex; x < e.results.length; x++) {
+						if (e.results[x].isFinal) {
+							final += e.results[x][0].transcript + ' ';
+							scribeSegments.current.push({ speaker: 'patient', text: e.results[x][0].transcript.trim(), timestamp: new Date().toISOString() });
+						}
+					}
+					if (final) {
+						scribeTextRef.current += final;
+						setScribeText(scribeTextRef.current);
+					}
+				};
+				rec.start();
+				scribeRef.current = rec;
+				scribeTimerRef.current = setInterval(() => {
+					scribeDurRef.current += 1;
+					setScribeDuration(d => d + 1);
+				}, 1000);
+				setScribeListening(true);
+			}
 		} catch (err) { console.error('Could not start recording:', err); }
 	}
 
@@ -278,15 +318,44 @@ export default function ConsultationPrep({ appointment, onBack }) {
 			mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
 			setIsRecording(false);
 		}
+		if (scribeRef.current) {
+			scribeRef.current.stop();
+			scribeRef.current = null;
+			clearInterval(scribeTimerRef.current);
+			setScribeListening(false);
+		}
 	}
 
 	async function endMeeting() {
-		stopRecording();
+		// Stop audio recording
+		if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+			mediaRecorderRef.current.stop();
+			mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+			setIsRecording(false);
+		}
+		// Stop speech recognizer and wait for final results to flush
+		if (scribeRef.current) {
+			scribeRef.current.stop();
+			scribeRef.current = null;
+			clearInterval(scribeTimerRef.current);
+			setScribeListening(false);
+			await new Promise(r => setTimeout(r, 800)); // wait for final onresult events
+		}
 		setMeetingActive(false);
+		const finalText = scribeTextRef.current.trim();
+		const finalDur  = scribeDurRef.current;
 		try {
+			if (finalText) {
+				await apiService.saveTranscript({
+					appointmentId: appointment.id,
+					rawText: finalText,
+					segments: scribeSegments.current,
+					durationSeconds: finalDur
+				});
+			}
 			await apiService.completeConsultation(appointment.id, {
-				rawText: '[Meeting completed — transcript processing...]',
-				durationSeconds: Math.round((Date.now() - new Date(appointment.date).getTime()) / 1000),
+				rawText: finalText || '[No transcript — microphone was not enabled during this session]',
+				durationSeconds: finalDur,
 				hasAudio: audioChunksRef.current.length > 0
 			});
 		} catch (err) { console.error('Error completing consultation:', err); }
@@ -478,9 +547,9 @@ export default function ConsultationPrep({ appointment, onBack }) {
 								<span className="text-lg">🎥</span>
 								<h3 className="font-semibold text-text-primary">Video Consultation</h3>
 							</div>
-							{isRecording && (
+							{meetingActive && (
 								<span className="badge-danger text-[10px] animate-pulse-soft">
-									<span className="w-2 h-2 rounded-full bg-danger-500" /> Recording
+									<span className="w-2 h-2 rounded-full bg-danger-500" /> Auto Recording
 								</span>
 							)}
 						</div>
@@ -533,16 +602,20 @@ export default function ConsultationPrep({ appointment, onBack }) {
 									/>
 								</div>
 								<div className="flex items-center gap-3">
-									{!isRecording ? (
-										<button onClick={startRecording} className="btn-secondary btn-sm flex-1 text-xs">🎤 Start Recording</button>
-									) : (
-										<button onClick={stopRecording} className="btn-danger btn-sm flex-1 text-xs">⏹ Stop Recording</button>
-									)}
 									<button onClick={endMeeting} className="btn-danger btn-sm flex-1 text-xs">📞 End Meeting</button>
 								</div>
-								<p className="text-[10px] text-text-secondary mt-3 text-center">
-									🔴 Audio is being captured for AI transcript generation.
-								</p>
+								{isRecording && (
+									<p className="text-[10px] text-text-secondary mt-3 text-center flex items-center justify-center gap-1">
+										<span className="w-2 h-2 rounded-full bg-danger-500 animate-pulse inline-block" />
+										Recording & transcribing...
+									</p>
+								)}
+								{scribeListening && scribeText && (
+									<div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-clinical max-h-32 overflow-y-auto">
+										<p className="text-[10px] font-semibold text-text-secondary uppercase tracking-wider mb-1">🎤 Live Transcript</p>
+										<p className="text-xs text-text-primary whitespace-pre-wrap">{scribeText}</p>
+									</div>
+								)}
 							</div>
 						)}
 					</div>

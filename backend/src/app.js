@@ -18,19 +18,22 @@ app.use(helmet({
 			defaultSrc: ["'self'"],
 			styleSrc: ["'self'", "'unsafe-inline'"],
 			scriptSrc: ["'self'"],
-			imgSrc: ["'self'", "data:", "https:", "http://localhost:4000"],
-			connectSrc: ["'self'", "http://localhost:4000"],
+			imgSrc: ["'self'", "data:", "https:", "http://localhost:4000", "http://127.0.0.1:4000"],
+			connectSrc: ["'self'", "http://localhost:4000", "http://127.0.0.1:4000", "http://localhost:8000", "http://127.0.0.1:8000"],
 			fontSrc: ["'self'"],
-			objectSrc: ["'none'"],
+			objectSrc: ["'self'", "http://localhost:4000", "http://127.0.0.1:4000"],
 			mediaSrc: ["'self'"],
-			frameSrc: ["'none'"]
+			frameSrc: ["'self'", "http://localhost:4000", "http://127.0.0.1:4000"],
+			frameAncestors: ["'self'", "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]
 		}
 	},
+	xFrameOptions: false,
 	hsts: {
 		maxAge: 31536000,
 		includeSubDomains: true,
 		preload: true
-	}
+	},
+	crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
 // CORS configuration for production security

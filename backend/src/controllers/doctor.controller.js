@@ -13,8 +13,8 @@ export async function getDoctors(req, res) {
 	try {
 		const { specialty, search } = req.query;
 
-		// Only show AI-verified doctors to patients
-		const filter = { isVerified: true };
+		// Show all doctors (verified and unverified)
+		const filter = {};
 
 		if (specialty && specialty !== 'All') {
 			filter.specialty = specialty;

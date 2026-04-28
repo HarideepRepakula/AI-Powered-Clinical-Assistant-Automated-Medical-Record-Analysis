@@ -1,62 +1,93 @@
 /**
- * AI Service — MedHub AI+
- * Uses Ollama (local LLM) for all AI features.
- * Model: llama3.2 (fully local, no API key, no rate limits)
+ * AI Service — ClinIQ
+ * Primary:  Groq (llama-3.3-70b-versatile) — fast cloud inference
+ * Fallback: Ollama (llama3.2)              — local inference
  *
  * Setup:
- *   1. Install Ollama: https://ollama.com
- *   2. Run: ollama pull llama3.2
- *   3. Ollama runs on http://localhost:11434 by default
+ *   1. Add GROQ_API_KEY=your_key to backend/.env
+ *      Get free key at: https://console.groq.com
+ *   2. Ollama fallback: ollama pull llama3.2
  */
 
 import { Ollama } from "ollama";
 
-const OLLAMA_MODEL  = process.env.OLLAMA_MODEL  || "llama3.2";
-const OLLAMA_HOST   = process.env.OLLAMA_HOST   || "http://localhost:11434";
+const GROQ_API_KEY  = process.env.GROQ_API_KEY;
+const GROQ_MODEL    = process.env.GROQ_MODEL  || "llama-3.3-70b-versatile";
+const GROQ_URL      = "https://api.groq.com/openai/v1/chat/completions";
+const OLLAMA_MODEL  = process.env.OLLAMA_MODEL || "llama3.2";
+const OLLAMA_HOST   = process.env.OLLAMA_HOST  || "http://localhost:11434";
 const MEDICAL_DISCLAIMER = `\n\n---\n⚕️ **Medical Disclaimer**: This AI-generated content is for informational purposes only and does not constitute medical advice. Always consult a qualified healthcare professional for medical decisions.`;
 
-// Singleton client
-const client = new Ollama({ host: OLLAMA_HOST });
+const ollamaClient = new Ollama({ host: OLLAMA_HOST });
 
-// ── Core helper ───────────────────────────────────────────────────────────────
+// ── Core generate: Groq first, Ollama fallback ────────────────────────────────
 
-async function generate(prompt) {
-	const response = await client.generate({
-		model:  OLLAMA_MODEL,
+async function generateGroq(prompt) {
+	if (!GROQ_API_KEY) throw new Error("No GROQ_API_KEY");
+	const res = await fetch(GROQ_URL, {
+		method: "POST",
+		headers: {
+			"Content-Type":  "application/json",
+			"Authorization": `Bearer ${GROQ_API_KEY}`
+		},
+		body: JSON.stringify({
+			model:       GROQ_MODEL,
+			messages:    [{ role: "user", content: prompt }],
+			temperature: 0.2,
+			max_tokens:  1024
+		})
+	});
+	if (!res.ok) {
+		const err = await res.text();
+		throw new Error(`Groq error ${res.status}: ${err}`);
+	}
+	const data = await res.json();
+	return data.choices[0].message.content.trim();
+}
+
+async function generateOllama(prompt) {
+	const response = await ollamaClient.generate({
+		model:   OLLAMA_MODEL,
 		prompt,
-		stream: false,
+		stream:  false,
 		options: { temperature: 0.2, num_predict: 1024 }
 	});
 	return response.response.trim();
 }
 
+async function generate(prompt) {
+	try {
+		const text = await generateGroq(prompt);
+		console.log("[AI] Groq responded");
+		return text;
+	} catch (groqErr) {
+		console.warn(`[AI] Groq failed (${groqErr.message}), falling back to Ollama...`);
+		try {
+			const text = await generateOllama(prompt);
+			console.log("[AI] Ollama fallback responded");
+			return text;
+		} catch (ollamaErr) {
+			console.error("[AI] Both Groq and Ollama failed:", ollamaErr.message);
+			throw new Error("AI service unavailable. Please try again later.");
+		}
+	}
+}
+
 function safeJson(text, fallback) {
 	try {
-		// Step 1: Remove markdown code fences
 		let cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-
-		// Step 2: Extract only the JSON object between first { and last }
 		const start = cleaned.indexOf('{');
 		const end   = cleaned.lastIndexOf('}');
-
-		if (start === -1 || end === -1) {
-			console.error("[OLLAMA] No JSON object found in response");
-			return fallback;
-		}
-
+		if (start === -1 || end === -1) return fallback;
 		return JSON.parse(cleaned.substring(start, end + 1));
-	} catch (err) {
-		console.error("[OLLAMA] Parsing failed. Raw snippet:", text.substring(0, 100));
+	} catch {
+		console.error("[AI] JSON parse failed. Snippet:", text.substring(0, 100));
 		return fallback;
 	}
 }
 
-// ── Exported functions (same signatures as before) ────────────────────────────
+// ── Exported functions ────────────────────────────────────────────────────────
 
-/**
- * Generate a natural-remedies-focused medical record summary.
- * Runs in background after upload — result cached in MedicalRecord.aiSummary.
- */
 export async function generateMedicalRecordSummary(ocrText, fileName) {
 	const prompt = `You are a holistic health assistant analyzing a medical document.
 Document: "${fileName}"
@@ -67,19 +98,18 @@ Provide a structured analysis in JSON only (no markdown):
   "summary": "2-3 sentence plain-language summary of what this document shows",
   "keyFindings": ["finding 1", "finding 2"],
   "naturalRemedies": [
-    "Specific dietary change or natural remedy (e.g., increase leafy greens for low iron)",
-    "Lifestyle recommendation (e.g., 30-min daily walk for elevated glucose)",
-    "Herbal or nutritional suggestion (e.g., turmeric tea for inflammation markers)"
+    "Specific dietary change or natural remedy",
+    "Lifestyle recommendation",
+    "Herbal or nutritional suggestion"
   ],
   "severityFlag": "none|mild|moderate|urgent",
-  "flagReason": "If urgent or moderate, explain why doctor consultation is needed. Otherwise empty string."
+  "flagReason": "If urgent or moderate, explain why. Otherwise empty string."
 }
 
-STRICT RULES:
-1. Do NOT recommend any pharmaceutical drugs, medications, or chemical compounds.
+RULES:
+1. Do NOT recommend pharmaceutical drugs.
 2. Only suggest natural remedies: diet, herbs, lifestyle, sleep, hydration, exercise.
-3. If any value is critically abnormal, set severityFlag to "urgent" and flagReason to explain.
-4. Keep naturalRemedies practical and specific to the findings.`;
+3. If any value is critically abnormal, set severityFlag to "urgent".`;
 
 	const text = await generate(prompt);
 	return safeJson(text, {
@@ -91,13 +121,10 @@ STRICT RULES:
 	});
 }
 
-/**
- * Parse raw OCR text from a lab report into structured JSON.
- */
 export async function parseLabReportOcr(rawText) {
 	const prompt = `You are a medical lab report parser.
-Given the following raw OCR text extracted from a lab report, extract ALL test results.
-Return ONLY valid JSON (no markdown, no explanation) in this exact format:
+Given the following raw OCR text from a lab report, extract ALL test results.
+Return ONLY valid JSON (no markdown):
 {
   "labName": "string or null",
   "recordDate": "YYYY-MM-DD or null",
@@ -114,11 +141,6 @@ Return ONLY valid JSON (no markdown, no explanation) in this exact format:
   ]
 }
 
-Rules:
-- numericValue must be a float extracted from value, or null if not parseable
-- flag: if value > upper reference range → "high", < lower → "low", within → "normal", otherwise "unknown"
-- Include ALL tests found
-
 RAW OCR TEXT:
 ---
 ${rawText.substring(0, 4000)}
@@ -128,9 +150,6 @@ ${rawText.substring(0, 4000)}
 	return safeJson(text, { tests: [], rawResponse: text });
 }
 
-/**
- * Generate a pre-consultation AI summary for a doctor.
- */
 export async function generatePreConsultSummary({ patientName, prescriptions, labResults }) {
 	const rxSummary = prescriptions.slice(0, 5).map((p, i) =>
 		`${i + 1}. Prescribed on ${p.createdAt?.toISOString?.().split("T")[0] || "unknown"}: ` +
@@ -151,7 +170,7 @@ ${rxSummary}
 RECENT LAB RESULTS:
 ${labSummary}
 
-Generate a concise pre-consultation clinical brief in JSON format only (no markdown):
+Generate a concise pre-consultation clinical brief in JSON only (no markdown):
 {
   "summary": "2-3 sentence clinical overview",
   "keyFindings": ["finding1", "finding2"],
@@ -168,9 +187,6 @@ Generate a concise pre-consultation clinical brief in JSON format only (no markd
 	return { ...parsed, disclaimer: MEDICAL_DISCLAIMER };
 }
 
-/**
- * CDSS drug interaction / contraindication check.
- */
 export async function runCdssCheck({ medicationName, patientLabHistory, existingMedications }) {
 	const labContext = patientLabHistory.slice(0, 5).flatMap(l =>
 		l.structuredData.slice(0, 8).map(t => `${t.testName}: ${t.value}${t.unit || ""} (${t.flag})`)
@@ -184,23 +200,17 @@ A doctor is about to prescribe: "${medicationName}"
 Patient's current medications: ${meds}
 Patient's recent lab values: ${labContext}
 
-Classification rules:
-- "contraindicated" = absolute contraindications exist (patient MUST NOT take this drug)
-- "warning" = serious drug interactions or warnings exist but no absolute contraindications
-- "caution" = minor interactions or general precautions only
-- "safe" = no significant risks found for standard use
-
-Formatting rules:
-- Do NOT include FDA section numbers like "(4)", "(6)", "[See Section X]"
-- Do NOT say "See Table 1" or "Table 2" — instead summarize what those tables contain
-- Keep each item to 1-2 clear sentences maximum
-- Strip parenthetical cross-references like "(e.g., anaphylaxis) [See Adverse Reactions (6)]"
+Classification:
+- "contraindicated" = absolute contraindications exist
+- "warning" = serious interactions exist
+- "caution" = minor interactions only
+- "safe" = no significant risks
 
 Return ONLY valid JSON:
 {
   "riskLevel": "safe|caution|warning|contraindicated",
-  "interactions": ["clean interaction summary without table references"],
-  "contraindications": ["clean contraindication without section numbers"],
+  "interactions": ["clean interaction summary"],
+  "contraindications": ["clean contraindication"],
   "labConcerns": ["concern based on lab values"],
   "recommendation": "one sentence actionable advice for the doctor",
   "requiresAttention": true
@@ -214,10 +224,6 @@ Return ONLY valid JSON:
 	return { ...parsed, disclaimer: MEDICAL_DISCLAIMER };
 }
 
-/**
- * Hybrid AI Assistant:
- * Uses personal records for context but falls back to general medical knowledge.
- */
 export async function generateChatbotResponse({ userMessage, context }) {
 	const hasRecords = context && context.length > 50 && context !== 'No history available.';
 
@@ -229,14 +235,13 @@ ${hasRecords ? context.substring(0, 3000) : 'No previous medical records found f
 USER QUESTION: "${userMessage}"
 
 GOAL:
-- If the answer is in the PATIENT HISTORY above, use it to give a personalised response.
-- If the PATIENT HISTORY is empty or does not contain the answer, use your general medical knowledge.
-- For symptoms like headache or stomach pain, suggest possible causes, home remedies, and which specialist to see.
+- If the answer is in the PATIENT HISTORY, use it to give a personalised response.
+- If not, use your general medical knowledge.
 - For emergencies like chest pain or difficulty breathing, advise calling emergency services immediately.
 - Always end with a Possible Next Steps section.
 
 RULES:
-1. Be concise, empathetic, and use bullet points for readability.
+1. Be concise, empathetic, use bullet points.
 2. Never give a definitive diagnosis or specific drug dosages.
 3. Always recommend consulting a doctor for final decisions.
 4. Keep response under 200 words.`;
@@ -246,6 +251,39 @@ RULES:
 		answer,
 		disclaimer: '⚕️ AI-generated guidance. Consult a doctor for medical decisions.'
 	};
+}
+
+export async function mapMedsToInventory(extractedNames, storeProducts) {
+	if (!extractedNames.length || !storeProducts.length) return [];
+
+	const storeNames = storeProducts.map(p => p.name).join(", ");
+	const prompt = `You are a pharmacist. A prescription contains: [${extractedNames.join(", ")}].
+Our store has: [${storeNames}].
+Match each prescription item to the closest store product (brand=generic is fine).
+Return ONLY a JSON array of matched store names, no explanation.
+Example: ["Paracetamol 500mg", "Amoxicillin 250mg"]`;
+
+	try {
+		const raw   = await generate(prompt);
+		const match = raw.match(/\[.*?\]/s);
+		if (match) {
+			const names = JSON.parse(match[0]);
+			return storeProducts.filter(p => names.some(n =>
+				p.name.toLowerCase().includes(n.toLowerCase()) ||
+				n.toLowerCase().includes(p.name.toLowerCase())
+			));
+		}
+	} catch {
+		console.warn('[AI] Fuzzy mapping failed, falling back to regex');
+	}
+
+	return storeProducts.filter(p =>
+		extractedNames.some(n =>
+			p.name.toLowerCase().includes(n.toLowerCase()) ||
+			n.toLowerCase().includes(p.name.toLowerCase()) ||
+			(p.genericName && p.genericName.toLowerCase().includes(n.toLowerCase()))
+		)
+	);
 }
 
 export async function generateHealthInsights(labResults) {
@@ -284,9 +322,6 @@ Focus on lifestyle changes, not medications.`;
 	];
 }
 
-/**
- * Generate a pre-consultation patient briefing summary.
- */
 export async function generatePatientBriefingSummary({ patientName, reason, prescriptions, labResults, transcripts }) {
 	const rxSummary = prescriptions.slice(0, 5).map((p, i) =>
 		`${i + 1}. Prescribed on ${p.createdAt?.toISOString?.().split("T")[0] || "unknown"}: ` +
@@ -337,10 +372,7 @@ Return ONLY valid JSON (no markdown):
 	const text = await generate(prompt);
 	const parsed = safeJson(text, {
 		patientOverview: text.substring(0, 300),
-		riskLevel: "unknown",
-		conditions: [],
-		labFindings: [],
-		prescriptions: [],
+		riskLevel: "unknown", conditions: [], labFindings: [], prescriptions: [],
 		concerns: ["Review current medications", "Discuss recent symptoms"],
 		insights: [],
 		discussionPoints: ["Review current medications", "Discuss recent symptoms", "Follow up on lab results"],
@@ -349,9 +381,6 @@ Return ONLY valid JSON (no markdown):
 	return { ...parsed, disclaimer: MEDICAL_DISCLAIMER };
 }
 
-/**
- * Generate a post-consultation summary from the meeting transcript.
- */
 export async function generatePostConsultationSummary({ transcript, patientName, doctorName, reason }) {
 	const prompt = `You are a clinical AI assistant. Analyze this consultation transcript and generate a structured summary.
 
@@ -380,15 +409,9 @@ Generate a post-consultation summary in JSON format only (no markdown):
 	});
 }
 
-// ── AI Admin Functions ────────────────────────────────────────────────────────
-
-/**
- * AI Admin: Credential Verification
- * OCR text from doctor's license → LLM decision: approved | rejected
- */
 export async function aiAdminVerifyDoctor(doctorData, licenseOcrText) {
-	const prompt = `You are the MedHub AI System Administrator.
-Your task is to verify if a doctor's registration data matches their uploaded medical license.
+	const prompt = `You are the ClinIQ AI System Administrator.
+Verify if a doctor's registration data matches their uploaded medical license.
 
 REGISTRATION DATA:
 - Name: ${doctorData.name}
@@ -400,33 +423,29 @@ EXTRACTED TEXT FROM LICENSE PHOTO (OCR):
 
 RULES:
 1. The name on the license must closely match the registration name.
-2. The license number must appear somewhere in the OCR text (if provided).
-3. The document must look like a valid medical license (not a random document).
-4. If the license looks fake, expired, or names don't match, REJECT.
+2. The license number must appear in the OCR text (if provided).
+3. The document must look like a valid medical license.
+4. If fake, expired, or names don't match, REJECT.
 
 Return ONLY valid JSON:
 {
   "decision": "approved" | "rejected",
   "confidenceScore": 0-100,
-  "reason": "short explanation of your decision",
+  "reason": "short explanation",
   "nameMatch": true | false,
   "licenseNumberFound": true | false
 }`;
 
 	const text = await generate(prompt);
-	return safeJson(text, { decision: "rejected", confidenceScore: 0, reason: "AI Admin verification error — manual review required", nameMatch: false, licenseNumberFound: false });
+	return safeJson(text, { decision: "rejected", confidenceScore: 0, reason: "AI verification error — manual review required", nameMatch: false, licenseNumberFound: false });
 }
 
-/**
- * AI Admin: System Health Report
- * Analyzes appointments + security logs → generates platform health summary
- */
 export async function aiAdminSystemReport({ appointments, recentLogins, flaggedUsers }) {
-	const apptSummary = `Total: ${appointments.total}, Completed: ${appointments.completed}, Cancelled: ${appointments.cancelled}, Pending: ${appointments.pending}`;
+	const apptSummary  = `Total: ${appointments.total}, Completed: ${appointments.completed}, Cancelled: ${appointments.cancelled}, Pending: ${appointments.pending}`;
 	const loginSummary = `Total logins (24h): ${recentLogins.total}, Failed: ${recentLogins.failed}, Locked accounts: ${recentLogins.locked}`;
 	const flagSummary  = flaggedUsers.length > 0 ? flaggedUsers.map(u => `${u.email} — ${u.reason}`).join('; ') : 'None';
 
-	const prompt = `You are the MedHub AI System Administrator generating a platform health report.
+	const prompt = `You are the ClinIQ AI System Administrator generating a platform health report.
 
 SYSTEM METRICS (last 24 hours):
 - Appointments: ${apptSummary}
@@ -450,18 +469,13 @@ Generate a concise system health report in JSON only:
 	return safeJson(text, {
 		overallHealth: "warning",
 		summary: "System report generation failed. Manual review recommended.",
-		securityAlerts: [],
-		recommendations: ["Check system logs manually"],
+		securityAlerts: [], recommendations: ["Check system logs manually"],
 		metrics: { appointmentCompletionRate: "N/A", loginSuccessRate: "N/A", activeThreats: 0 }
 	});
 }
 
-/**
- * AI Admin: Medical Record Content Moderation
- * Flags records that contain non-medical or inappropriate content
- */
 export async function aiAdminModerateRecord(recordName, ocrText) {
-	const prompt = `You are the MedHub AI Content Moderator.
+	const prompt = `You are the ClinIQ AI Content Moderator.
 Review this medical record and determine if it contains legitimate medical content.
 
 Record Name: "${recordName}"

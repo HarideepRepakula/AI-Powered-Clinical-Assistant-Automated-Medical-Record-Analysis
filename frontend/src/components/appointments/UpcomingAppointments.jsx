@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import apiService from '../../services/api.js';
 
 const STATUS_STYLES = {
 	pending:     { bg: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-400',   label: 'Pending' },
@@ -37,8 +38,30 @@ function LiveCountdown({ appointmentDate, startTime }) {
 	);
 }
 
+function minutesUntil(date, startTime) {
+	const [h, m] = startTime.split(':').map(Number);
+	const apt = new Date(date);
+	apt.setHours(h, m, 0, 0);
+	return (apt.getTime() - Date.now()) / 60000;
+}
+
 export default function UpcomingAppointments({ appointments, onConsult, onReschedule, onCancel }) {
+	const [notifiedIds, setNotifiedIds] = useState({});
+	const [loadingIds, setLoadingIds]   = useState({});
 	const upcoming = appointments.filter(a => ['pending', 'confirmed', 'in_progress'].includes(a.status));
+
+	async function handleReadyForMeeting(apt) {
+		setLoadingIds(prev => ({ ...prev, [apt.id]: true }));
+		try {
+			await apiService.markPatientReady(apt.id);
+			setNotifiedIds(prev => ({ ...prev, [apt.id]: true }));
+			onConsult(apt);
+		} catch (e) {
+			console.error('Ready for meeting failed:', e.message);
+		} finally {
+			setLoadingIds(prev => ({ ...prev, [apt.id]: false }));
+		}
+	}
 
 	if (upcoming.length === 0) {
 		return (
@@ -57,7 +80,6 @@ export default function UpcomingAppointments({ appointments, onConsult, onResche
 
 	return (
 		<div className="card overflow-hidden p-0">
-			{/* Header */}
 			<div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
 				<div className="flex items-center gap-2">
 					<span className="text-xl">📅</span>
@@ -66,11 +88,14 @@ export default function UpcomingAppointments({ appointments, onConsult, onResche
 				</div>
 			</div>
 
-			{/* ── Mobile Card Layout (< md) ── */}
+			{/* ── Mobile Card Layout ── */}
 			<div className="md:hidden divide-y divide-gray-50">
 				{upcoming.map(apt => {
-					const style      = STATUS_STYLES[apt.status] || STATUS_STYLES.pending;
-					const doctorName = typeof apt.doctor === 'object' ? apt.doctor.name : apt.doctor;
+					const style           = STATUS_STYLES[apt.status] || STATUS_STYLES.pending;
+					const doctorName      = typeof apt.doctor === 'object' ? apt.doctor.name : apt.doctor;
+					const mins            = minutesUntil(apt.date, apt.startTime);
+					const showReady       = mins <= 15 && mins > -60;
+					const alreadyNotified = notifiedIds[apt.id];
 					return (
 						<div key={apt.id} className="p-4 space-y-3">
 							<div className="flex items-center justify-between">
@@ -98,6 +123,22 @@ export default function UpcomingAppointments({ appointments, onConsult, onResche
 								<div className="col-span-2"><LiveCountdown appointmentDate={apt.date} startTime={apt.startTime} /></div>
 							</div>
 
+							{showReady && (
+								<button
+									onClick={() => handleReadyForMeeting(apt)}
+									disabled={loadingIds[apt.id]}
+									className="w-full py-2.5 rounded-clinical text-sm font-semibold text-white bg-green-500 hover:bg-green-600 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+								>
+									{loadingIds[apt.id] ? (
+										<><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Notifying Doctor...</>
+									) : alreadyNotified ? (
+										'✅ Doctor Notified — Joining...'
+									) : (
+										'🟢 Ready for Meeting'
+									)}
+								</button>
+							)}
+
 							<div className="flex gap-2">
 								<button onClick={() => onConsult(apt)} className="btn-primary btn-sm text-xs flex-1">🩺 Consult</button>
 								<button onClick={() => onReschedule?.(apt)} className="btn-secondary btn-sm text-xs">📅</button>
@@ -108,7 +149,7 @@ export default function UpcomingAppointments({ appointments, onConsult, onResche
 				})}
 			</div>
 
-			{/* ── Desktop Table Layout (≥ md) ── */}
+			{/* ── Desktop Table Layout ── */}
 			<div className="hidden md:block overflow-x-auto">
 				<table className="table-clinical">
 					<thead>
@@ -124,8 +165,11 @@ export default function UpcomingAppointments({ appointments, onConsult, onResche
 					</thead>
 					<tbody>
 						{upcoming.map(apt => {
-							const style      = STATUS_STYLES[apt.status] || STATUS_STYLES.pending;
-							const doctorName = typeof apt.doctor === 'object' ? apt.doctor.name : apt.doctor;
+							const style           = STATUS_STYLES[apt.status] || STATUS_STYLES.pending;
+							const doctorName      = typeof apt.doctor === 'object' ? apt.doctor.name : apt.doctor;
+							const mins            = minutesUntil(apt.date, apt.startTime);
+							const showReady       = mins <= 15 && mins > -60;
+							const alreadyNotified = notifiedIds[apt.id];
 							return (
 								<tr key={apt.id} className="group">
 									<td>
@@ -152,8 +196,23 @@ export default function UpcomingAppointments({ appointments, onConsult, onResche
 										</span>
 									</td>
 									<td>
-										<div className="flex items-center gap-2">
-											<button onClick={() => onConsult(apt)} className="btn-primary btn-sm text-xs whitespace-nowrap group-hover:shadow-clinical-md transition-shadow">
+										<div className="flex items-center gap-2 flex-wrap">
+											{showReady && (
+												<button
+													onClick={() => handleReadyForMeeting(apt)}
+													disabled={loadingIds[apt.id]}
+													className="px-3 py-1.5 rounded-clinical text-xs font-semibold text-white bg-green-500 hover:bg-green-600 disabled:opacity-60 transition-colors whitespace-nowrap flex items-center gap-1.5"
+												>
+													{loadingIds[apt.id] ? (
+														<><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Notifying...</>
+													) : alreadyNotified ? (
+														'✅ Notified'
+													) : (
+														'🟢 Ready for Meeting'
+													)}
+												</button>
+											)}
+											<button onClick={() => onConsult(apt)} className="btn-primary btn-sm text-xs whitespace-nowrap">
 												🩺 Consult
 											</button>
 											<div className="relative group/actions">

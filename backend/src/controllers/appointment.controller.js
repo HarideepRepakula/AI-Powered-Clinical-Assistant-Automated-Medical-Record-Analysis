@@ -1,9 +1,30 @@
 import mongoose from "mongoose";
+import { spawn } from 'child_process';
+import path from 'path';
 import { AppointmentModel } from "../models/Appointment.js";
 import { DoctorModel } from "../models/Doctor.js";
 import { UserModel } from "../models/User.js";
 import { MedicalRecordModel } from "../models/MedicalRecord.js";
 import { v4 as uuidv4 } from 'uuid';
+import { notifyPreConsultReminder } from "../services/notificationService.js";
+
+// ─── BART Python Bridge ───────────────────────────────────────────────────────
+function runBartAI(text) {
+	return new Promise((resolve, reject) => {
+		const scriptPath = path.join(process.cwd(), 'summarize.py');
+		const py = spawn('python', [scriptPath]);
+		let result = '', error = '';
+		py.stdin.write(text);
+		py.stdin.end();
+		py.stdout.on('data', d => { result += d.toString(); });
+		py.stderr.on('data', d => { error += d.toString(); });
+		py.on('close', code => {
+			if (code === 0 && result.trim()) resolve(result.trim());
+			else { console.error('[BART]', error); reject(new Error('BART summarization failed')); }
+		});
+		py.on('error', err => reject(new Error('Python not found: ' + err.message)));
+	});
+}
 import {
 	notifyBookingConfirmed,
 	notifyDoctorReschedule,
@@ -54,6 +75,47 @@ const validateAppointmentData = (data) => {
 		if ((eh * 60 + em) <= (sh * 60 + sm)) throw new Error('End time must be after start time');
 	}
 };
+
+// ─── Patient Ready for Meeting ───────────────────────────────────────────────
+
+export async function patientReadyForMeeting(req, res) {
+	try {
+		const { id } = req.params;
+		const patientId = req.user.userId;
+
+		const appointment = await AppointmentModel.findById(id)
+			.populate('patientId', 'name')
+			.lean();
+
+		if (!appointment)
+			return res.status(404).json({ success: false, error: 'Appointment not found' });
+
+		if (appointment.patientId._id.toString() !== patientId)
+			return res.status(403).json({ success: false, error: 'Unauthorized' });
+
+		// Update status to confirmed so doctor sees patient is ready
+		if (appointment.status === 'pending') {
+			await AppointmentModel.findByIdAndUpdate(id, { status: 'confirmed', lastModifiedBy: patientId });
+		}
+
+		// Notify doctor
+		const { notifyPatientReady } = await import('../services/notificationService.js');
+		process.nextTick(async () => {
+			try {
+				await notifyPatientReady(
+					appointment.doctorId.toString(),
+					{ name: appointment.patientId.name, _id: patientId },
+					{ _id: id, startTime: appointment.startTime }
+				);
+			} catch (e) { console.error('[NOTIFY] Patient ready failed:', e.message); }
+		});
+
+		res.json({ success: true, message: 'Doctor notified. You can now join the meeting.' });
+	} catch (error) {
+		console.error('Patient ready error:', error);
+		res.status(500).json({ success: false, error: 'Failed to notify doctor' });
+	}
+}
 
 // ─── Book Appointment ─────────────────────────────────────────────────────────
 
@@ -681,7 +743,7 @@ export async function getDoctorAvailability(req, res) {
 
 		// Generate available slots (9 AM to 5 PM, 30-minute slots)
 		const availableSlots = [];
-		for (let hour = 9; hour < 17; hour++) {
+		for (let hour = 9; hour < 23; hour++) {
 			for (let minute = 0; minute < 60; minute += 30) {
 				const startTime = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
 				const endTime   = minute === 30
@@ -750,84 +812,120 @@ export async function getAiSummary(req, res) {
 			return res.status(404).json({ success: false, error: 'Appointment not found' });
 		}
 
-		// Auth: must be patient or doctor
 		const aptPatientId = appointment.patientId._id?.toString() ?? appointment.patientId.toString();
 		const aptDoctorId  = appointment.doctorId?.toString();
 		if (aptPatientId !== userId && aptDoctorId !== userId) {
 			return res.status(403).json({ success: false, error: 'Unauthorized' });
 		}
 
-		// If summary already exists, return it
+		// Return cached summary if available
 		if (appointment.aiPreparedSummary?.content) {
 			return res.json({
 				success: true,
 				data: {
-					summary: appointment.aiPreparedSummary.content,
-					editablePoints: appointment.aiPreparedSummary.editablePoints || [],
-					isLocked: appointment.aiPreparedSummary.isLocked || false,
+					summary:         appointment.aiPreparedSummary.content,
+					editablePoints:  appointment.aiPreparedSummary.editablePoints || [],
+					isLocked:        appointment.aiPreparedSummary.isLocked || false,
 					sharedWithDoctor: appointment.aiPreparedSummary.sharedWithDoctor || false,
-					generatedAt: appointment.aiPreparedSummary.generatedAt
+					generatedAt:     appointment.aiPreparedSummary.generatedAt
 				}
 			});
 		}
 
-		// Generate new summary using Gemini
-		const { generatePatientBriefingSummary } = await import('../services/ollamaService.js');
+		// Fetch patient context from MongoDB
 		const { PrescriptionModel } = await import('../models/Prescription.js');
-		const { LabResultModel } = await import('../models/LabResult.js');
-		const { TranscriptModel } = await import('../models/Transcript.js');
+		const { LabResultModel }    = await import('../models/LabResult.js');
 
 		const patientId = appointment.patientId._id;
-
-		const [prescriptions, labResults, transcripts] = await Promise.all([
-			PrescriptionModel.find({ patientId }).sort({ createdAt: -1 }).limit(5).lean(),
-			LabResultModel.find({ patientId }).sort({ recordDate: -1 }).limit(5).lean(),
-			TranscriptModel.find({ patientId }).sort({ createdAt: -1 }).limit(3).lean()
+		const [prescriptions, labResults] = await Promise.all([
+			PrescriptionModel.find({ patientId }).sort({ createdAt: -1 }).limit(3).lean(),
+			LabResultModel.find({ patientId }).sort({ recordDate: -1 }).limit(3).lean()
 		]);
 
-		const summaryResult = await generatePatientBriefingSummary({
-			patientName: appointment.patientId.name,
-			reason: appointment.reason,
-			prescriptions,
-			labResults,
-			transcripts
-		});
+		const labText = labResults.map(l => l.rawText || l.rawOcrText || '').filter(Boolean).join(' ');
+		const medText = prescriptions.flatMap(p => p.medicines?.map(m => m.name) || []).join(', ');
+		const fullContext = [
+			`Patient: ${appointment.patientId.name}.`,
+			`Reason for visit: ${appointment.reason}.`,
+			medText  ? `Current medications: ${medText}.` : '',
+			labText  ? `Lab records: ${labText}.` : ''
+		].filter(Boolean).join(' ');
 
-		// Store summary in appointment
-		await AppointmentModel.findByIdAndUpdate(id, {
-			$set: {
-				'aiPreparedSummary.content': summaryResult.summary || '',
-				'aiPreparedSummary.editablePoints': summaryResult.keyPoints || [],
-				'aiPreparedSummary.generatedAt': new Date(),
-				'aiPreparedSummary.isLocked': false,
-				'aiPreparedSummary.sharedWithDoctor': false
+		console.log('--- AI START: Facebook BART processing ---');
+		const bartRaw = await runBartAI(fullContext);
+		console.log('--- AI COMPLETE ---');
+
+		// Parse structured JSON from Python
+		let bartSummary, extractedMeds = [];
+		try {
+			const parsed = JSON.parse(bartRaw);
+			bartSummary  = parsed.summary;
+			extractedMeds = parsed.extracted_meds || [];
+		} catch {
+			bartSummary = bartRaw;
+		}
+
+		// Notify doctor that the AI brief is ready (fire-and-forget)
+		process.nextTick(async () => {
+			try {
+				const patient = await UserModel.findById(appointment.patientId._id).lean();
+				if (patient) {
+					await notifyPreConsultReminder(
+						appointment.doctorId,
+						patient,
+						{ _id: id, startTime: appointment.startTime }
+					);
+				}
+			} catch (e) {
+				console.warn('[NOTIFY] Pre-consult reminder failed:', e.message);
 			}
 		});
+
+		// Build medicine objects for pharmacy auto-cart
+		const medicineObjects = extractedMeds.map(name => ({
+			name,
+			dosage:    'As directed',
+			frequency: 'Check with doctor'
+		}));
+
+		// Cache summary + auto-populate medicines in MongoDB
+		const updatePayload = {
+			$set: {
+				'aiPreparedSummary.content':        bartSummary,
+				'aiPreparedSummary.editablePoints': [
+					'Review abnormal values from recent labs',
+					'Check interactions with current medications',
+					'Discuss lifestyle changes mentioned in history'
+				],
+				'aiPreparedSummary.generatedAt':    new Date(),
+				'aiPreparedSummary.isLocked':       false,
+				'aiPreparedSummary.sharedWithDoctor': false
+			}
+		};
+		if (medicineObjects.length > 0) {
+			updatePayload.$set['consultationRecords.medicines'] = medicineObjects;
+			console.log(`[BART] Auto-populated ${medicineObjects.length} medicines for pharmacy cart`);
+		}
+		await AppointmentModel.findByIdAndUpdate(id, updatePayload);
 
 		res.json({
 			success: true,
 			data: {
-				summary: summaryResult.summary,
-				editablePoints: summaryResult.keyPoints || [],
-				medications: summaryResult.medications || [],
-				labFindings: summaryResult.labFindings || [],
-				riskLevel: summaryResult.riskLevel || 'unknown',
-				isLocked: false,
-				sharedWithDoctor: false,
-				generatedAt: new Date().toISOString(),
-				disclaimer: summaryResult.disclaimer
+				summary: bartSummary,
+				medsFound: extractedMeds,
+				editablePoints: [
+					'Review abnormal values from recent labs',
+					'Check interactions with current medications',
+					'Discuss lifestyle changes mentioned in history'
+				],
+				isLocked:    false,
+				generatedAt: new Date().toISOString()
 			}
 		});
 
 	} catch (error) {
 		console.error('Get AI summary error:', error.message);
-		if (error.message?.includes('GEMINI_API_KEY')) {
-			return res.status(503).json({ success: false, error: 'AI service not configured.' });
-		}
-		if (error.message?.includes('API_KEY_INVALID') || error.message?.includes('403')) {
-			return res.status(503).json({ success: false, error: 'Gemini API key is invalid or expired. Please rotate it at https://aistudio.google.com' });
-		}
-		res.status(500).json({ success: false, error: 'Failed to generate AI summary' });
+		res.status(500).json({ success: false, error: 'The AI Engine is currently processing data. Please try again in a moment.' });
 	}
 }
 
